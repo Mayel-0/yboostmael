@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YCuisine</title>
+</head>
+<body>
+
+  <form action="/search" method="post">
+    <label for="search">recherche :</label>
+    <input name="name" id="search" list="recette">
+  </form>
+
+    <datalist id="recette">
+      {{range .Listfood}}
+        <option value="{{.Name}}">
+      {{end}}
+    </datalist>
+
+  {{range .Listfood}}
+  <a href="/meals?recette={{.Id}}">
+    <h2>{{.Name}}</h2>
+    <img height="260" width="260" src="{{.Thumb}}"/>
+  </a>
+  {{end}}
+</body>
+</html>

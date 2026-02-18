@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YCuisine</title>
+</head>
+<body>
+  <h1>Categorie</h1>
+  {{range .Categoriefood}}
+    <a href="/categorie?categorie={{.Name}}">
+      <h2>{{.Name}}</h2>
+      <img src="{{.Thumb}}"/>
+    </a>
+  {{end}}
+
+  <h1>favoris</h1>
+  <div class="listefavoris">
+    {{range .Favorisliste}}
+      <a href="/meals?recette={{.Id}}">
+        <h2>{{.Name}}</h2>
+        <img height="260" width="260" src="{{.Thumb}}"/>
+      </a>
+    {{end}}
+  </div>
+  <h1>random :</h1>
+  <div class="randomList">
+    {{range .Listrandom}}
+      <a href="/meals?recette={{.Id}}">
+        <h2>{{.Name}}</h2>
+        <img height="260" width="260" src="{{.Thumb}}"/>
+      </a>
+      <form action="/addfavoris" method="post">
+        <input type="hidden" name="id" value="{{.Id}}">
+        <input type="hidden" name="name" value="{{.Name}}">
+        <input type="hidden" name="categorie" value="{{.Categorie}}">
+        <input type="hidden" name="origine" value="{{.Origine}}">
+        <input type="hidden" name="Thumb" value="{{.Thumb}}">
+        <button type="submit">ajouter au favoris</button>
+      </form>
+    {{end}}
+  </div>
+  <h1>A faire :</h1>
+  <div class="afaireliste">
+  </div>
+</body>
+</html>

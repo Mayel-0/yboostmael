@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YCuisine</title>
+</head>
+<body>
+  <main>
+    {{range .Recette}}
+      <img height="260" width="260" src="{{.Thumb}}">
+      <h1>{{.Name}}</h1>
+      <h2>{{.NameAlternet}}</h2>
+      <p><strong>categorie : </strong>{{.Categorie}}</p>
+      <p><strong>origine : </strong>{{.Origine}}</p>
+      <label><strong>instruction : </strong></label>
+      <p>{{.Instruction}}</p>
+      <p><stron>Tags : </stron>{{.Tags}}</p>
+      <div class="containeurYoutube">
+        <iframe width="620" height="515" title="{{.Name}}" src="{{.YoutubeEmbed}}">
+      </div>
+    {{end}}
+  </main>
+</body>
+</html>

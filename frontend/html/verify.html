@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YCuisine</title>
+</head>
+<body>
+  <h1>code a 6 chiffres :</h1>
+  <form action="/verify" method="post" class="verify">
+    <input type="hidden" name="Users_id" value="{{.User_id}}">
+    <label>Verification code :</label>
+    <input type="text" name="code" id="code" required/>
+    <button type="submit">Verification</button>
+  </form>
+  {{if .Errmsg}}
+    <p class="error">{{.Errmsg}}</p>
+  {{end}}
+</body>
+</html>
