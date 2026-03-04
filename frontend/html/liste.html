@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YCuisine</title>
+  <style>
+    .LigneListe {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    {{range .Liste}}
+    <form action="/liste/update" method="POST" class="update-form">
+      <div class="LigneListe">
+        <label>{{.Aliment}}</label>
+        <label>{{.Nombre}} {{.Unite}} / {{.Prix}} 💵</label>
+        <input type="hidden" name="id" value="{{.Id}}">
+        <input type="checkbox"
+               name="is_finish"
+               value="1"
+               {{if .Is_finish}}checked{{end}}
+               onchange="this.form.submit()">
+
+        <!-- ✅ Statut visuel -->
+        <span style="color: {{if .Is_finish}}green{{else}}orange{{end}};">
+          {{if .Is_finish}}✓ Terminé{{else}}⏳ En cours{{end}}
+        </span>
+      </div>
+    </form>
+    <form action="/liste/delete" method="post">
+      <input type="hidden" name="id" value="{{.Id}}"/>
+      <button type="submit">X</button>
+    </form>
+    {{end}}
+
+    <h2>Prix Total : {{printf "%.2f" .PrixTotal}} 💶</h2>
+
+    <!-- Formulaire d'ajout (PARFAIT tel quel) -->
+    <form action="/liste/add" method="post" style="margin-top: 20px;">
+      <input type="text" name="aliment" placeholder="Aliment..." required>
+      <input type="number" name="nombre" step="0.01" min="0" placeholder="0.00" required>
+      <input type="text" name="unite" list="uniter" placeholder="kg">
+      <input type="number" name="prix" step="0.01" min="0" placeholder="0.00" required>
+      <button type="submit">Ajouter à la liste</button>
+    </form>
+
+    <datalist id="uniter">
+      <option value="g">
+      <option value="kg">
+      <option value="ml">
+      <option value="L">
+      <option value="u (unité)">
+    </datalist>
+  </main>
+</body>
+</html>

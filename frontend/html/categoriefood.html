@@ -19,10 +19,10 @@
     </datalist>
 
   {{range .Listfood}}
-  <a href="/meals?recette={{.Id}}">
-    <h2>{{.Name}}</h2>
-    <img height="260" width="260" src="{{.Thumb}}"/>
-  </a>
+    <a href="/meals?recette={{.Id}}">
+      <h2>{{.Name}}</h2>
+      <img height="260" width="260" src="{{.Thumb}}"/>
+    </a>
   {{end}}
 </body>
 </html>

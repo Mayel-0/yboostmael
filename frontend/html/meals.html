@@ -15,10 +15,43 @@
       <p><strong>origine : </strong>{{.Origine}}</p>
       <label><strong>instruction : </strong></label>
       <p>{{.Instruction}}</p>
-      <p><stron>Tags : </stron>{{.Tags}}</p>
+      <p><strong>Tags : </strong>{{.Tags}}</p>
+      {{if .Youtube}}
       <div class="containeurYoutube">
-        <iframe width="620" height="515" title="{{.Name}}" src="{{.YoutubeEmbed}}">
+        <iframe width="620" height="515" title="{{.Name}}" src="{{.YoutubeEmbed}}" allowfullscreen></iframe>
       </div>
+      {{end}}
+
+      <form action="/addfavoris" method="post">
+        <input type="hidden" name="id" value="{{.Id}}">
+        <input type="hidden" name="name" value="{{.Name}}">
+        <input type="hidden" name="categorie" value="{{.Categorie}}">
+        <input type="hidden" name="origine" value="{{.Origine}}">
+        <input type="hidden" name="Thumb" value="{{.Thumb}}">
+        <button type="submit">ajouter au favoris</button>
+      </form>
+    {{end}}
+
+    <h2>Commentaires</h2>
+    {{range $.Listecommentaire}}
+      <div class="commentaire">
+        <p>{{.Data_string}}</p>
+        {{if eq .Users_id $.User_id}}
+        <form action="/deletecommentaire" method="post" style="display:inline;">
+          <input type="hidden" name="id" value="{{.Id}}"/>
+          <button type="submit" onclick="return confirm('Supprimer ce commentaire ?')">Supprimer</button>
+        </form>
+        {{end}}
+      </div>
+    {{end}}
+
+    <h3>Ajouter un commentaire</h3>
+    {{range .Recette}}
+    <form action="/addcommentaire" method="post">
+      <input type="text" name="data" placeholder="Ton commentaire" required>
+      <input type="hidden" name="id" value="{{.Id}}"/>
+      <button type="submit">Envoyer</button>
+    </form>
     {{end}}
   </main>
 </body>
