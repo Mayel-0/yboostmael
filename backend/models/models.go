@@ -15,13 +15,23 @@ type Users struct {
 }
 
 type Pagedata struct {
-	Errmsg        string
-	User_id       int
-	Categoriefood []Food_categorie
-	Listfood      []Food_affichage
-	Recette       []Recette
-	Listrandom    []Recette
-	Favorisliste  []Favoris
+	Errmsg           string
+	User_id          int
+	Categoriefood    []Food_categorie
+	Listfood         []Food_affichage
+	Recette          []Recette
+	Listrandom       []Recette
+	Favorisliste     []Favoris
+	Listecommentaire []Commentaire
+	Liste            []Liste
+	PrixTotal        float64
+}
+
+type Commentaire struct {
+	Id          int    `db:"id"`
+	Users_id    int    `db:"users_id"`
+	Data_string string `db:"data_string"`
+	Meal_id     int    `db:"meal_id"`
 }
 
 type Favoris struct {
@@ -127,6 +137,16 @@ type Recette struct {
 	ImageSource              *string `json:"strImageSource"`
 	CreativeCommonsConfirmed *string `json:"strCreativeCommonsConfirmed"`
 	DateModified             *string `json:"dateModified"`
+}
+
+type Liste struct {
+	Id        int     `db:"id"`
+	Id_users  int     `db:"id_users"`
+	Aliment   string  `db:"aliment"`
+	Nombre    float64 `db:"nombre"`
+	Unite     string  `db:"unite"`
+	Prix      float64 `db:"prix"`
+	Is_finish bool    `db:"is_finish"`
 }
 
 func (r Recette) YoutubeEmbed() string {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -99,6 +98,7 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/html/categoriefood.html",
 		"../frontend/html/meals.html",
 		"../frontend/html/favoris.html",
+		"../frontend/html/liste.html",
 	)
 	if err != nil {
 		return nil, err
@@ -459,16 +459,42 @@ func recetteHandle(w http.ResponseWriter, r *http.Request) {
 	data := models.Pagedata{}
 	switch r.Method {
 	case http.MethodGet:
-		recetteidstr := r.URL.Query().Get("recette")
-		url := os.Getenv("API_BYID") + recetteidstr
+		// Récupérer l'utilisateur connecté
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			return
+		}
 
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			return
+		}
+
+		recetteidstr := r.URL.Query().Get("recette")
+		recetteid, err := strconv.Atoi(recetteidstr)
+		if err != nil {
+			http.Error(w, "erreur de convertisseur", http.StatusInternalServerError)
+			return
+		}
+
+		url := os.Getenv("API_BYID") + recetteidstr
 		err = ApiRecettefunc(url)
 		if err != nil {
 			http.Error(w, "erreur de api recette", http.StatusInternalServerError)
 			return
 		}
+
+		Liste := GetCommentaireById(recetteid)
+		data.Listecommentaire = Liste
 		data.Recette = ApiRecette
+		data.User_id = sess.Userid
+
+		// ✅ TOUT est prêt → MAINTENANT on écrit
 		if err = tpl.ExecuteTemplate(w, "meals.html", data); err != nil {
+			log.Printf("Erreur template recette: %v", err)
 			http.Error(w, "erreur template", http.StatusInternalServerError)
 			return
 		}
@@ -512,36 +538,6 @@ func loadRandomRecettes(n int) ([]models.Recette, error) {
 		}
 	}
 	return res, nil
-}
-
-// Middleware : vérifie session, retourne userID ou 401
-func requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Récup cookie
-		c, err := r.Cookie("session_token")
-		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
-			return
-		}
-
-		// Vérifie session existe
-		sess, exists := sessions[c.Value]
-		if !exists {
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
-			return
-		}
-
-		// Vérifie expiration
-		if time.Now().After(sess.Expiry) {
-			delete(sessions, c.Value)
-			http.Error(w, "Session expirée", http.StatusUnauthorized)
-			return
-		}
-
-		// Ajoute userID au contexte (optionnel)
-		ctx := context.WithValue(r.Context(), "userID", sess.Userid)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	}
 }
 
 func addfavorisHandle(w http.ResponseWriter, r *http.Request) {
@@ -675,39 +671,374 @@ func deletefavorisHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func addCom(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+
+		referer := r.Header.Get("Referer")
+		if referer == "" {
+			referer = "/" // Fallback si pas de referer
+		}
+
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			return
+		}
+
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			return
+		}
+
+		dataCom := r.FormValue("data")
+		idstr := r.FormValue("id")
+		id, err := strconv.Atoi(idstr)
+		if err != nil {
+			println("erreur de conv")
+		}
+		_, err = db.Exec("INSERT INTO commentaire(users_id,data_string,meal_id) VALUES (?,?,?)", &sess.Userid, &dataCom, &id)
+		if err != nil {
+			http.Error(w, "Erreur d'insert", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, referer, http.StatusSeeOther)
+	default:
+		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func GetCommentaireById(id int) []models.Commentaire {
+	var Listallcommentaire []models.Commentaire
+	rows, err := db.Query("SELECT * FROM commentaire WHERE meal_id = ?", id)
+	if err != nil {
+		println("erreur select")
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var c models.Commentaire
+		rows.Scan(&c.Id, &c.Users_id, &c.Data_string, &c.Meal_id)
+		Listallcommentaire = append(Listallcommentaire, c)
+	}
+	println(Listallcommentaire)
+	return Listallcommentaire
+}
+
+func deleteCom(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			return
+		}
+
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			return
+		}
+
+		idstr := r.FormValue("id")
+		id, err := strconv.Atoi(idstr)
+		if err != nil {
+			http.Error(w, "erreur convertion", http.StatusInternalServerError)
+			return
+		}
+
+		referer := r.Header.Get("Referer")
+		if referer == "" {
+			referer = "/home"
+		}
+
+		_, err = db.Exec("DELETE FROM commentaire WHERE users_id = ? AND id = ?", &sess.Userid, &id)
+		if err != nil {
+			http.Error(w, "Erreur delete", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, referer, http.StatusSeeOther)
+	default:
+		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func listeHandle(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			return
+		}
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			return
+		}
+
+		var Liste []models.Liste
+		rows, err := db.Query("SELECT * FROM liste WHERE id_users = ?", sess.Userid) // Sans &
+		if err != nil {
+			log.Printf("DB erreur: %v", err)
+			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var l models.Liste
+			if err := rows.Scan(&l.Id, &l.Id_users, &l.Aliment, &l.Nombre, &l.Unite, &l.Prix, &l.Is_finish); err != nil {
+				log.Printf("Scan erreur: %v", err)
+				continue
+			}
+			Liste = append(Liste, l)
+		}
+
+		prixTotal, err := TotalPrix(sess.Userid)
+		if err != nil {
+			log.Printf("TotalPrix erreur: %v", err)
+			prixTotal = 0
+		}
+
+		data := models.Pagedata{Liste: Liste, PrixTotal: prixTotal}
+		tpl.ExecuteTemplate(w, "liste.html", data)
+	default:
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+	}
+}
+
+func TotalPrix(id_users int) (float64, error) {
+	total := 0.00
+	rows, err := db.Query("SELECT prix FROM liste WHERE id_users = ?", &id_users)
+	if err != nil {
+		return total, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var n float64
+		if err = rows.Scan(&n); err != nil {
+			return total, err
+		}
+
+		total += n
+	}
+
+	return total, err
+}
+
+func listeUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/liste", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		log.Printf("ParseForm erreur: %v", err)
+		http.Redirect(w, r, "/liste", http.StatusSeeOther)
+		return
+	}
+
+	// Récup ID depuis le formulaire
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		log.Printf("ID invalide: %v", err)
+		http.Redirect(w, r, "/liste", http.StatusSeeOther)
+		return
+	}
+
+	// Session check
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	sess, exists := sessions[c.Value]
+	if !exists || time.Now().After(sess.Expiry) {
+		delete(sessions, c.Value)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Checkbox : coché="1", non coché=absent → 0
+	isFinish := r.FormValue("is_finish") == "1"
+
+	// UPDATE DB (sécurisé avec id_users)
+	_, err = db.Exec("UPDATE liste SET is_finish = ? WHERE id = ? AND id_users = ?",
+		isFinish, id, sess.Userid)
+	if err != nil {
+		log.Printf("Update erreur %d: %v", id, err)
+	}
+
+	http.Redirect(w, r, "/liste", http.StatusSeeOther)
+}
+
+func ListeAdd(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			return
+		}
+
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			return
+		}
+
+		referer := r.Header.Get("Referer")
+		if referer == "" {
+			referer = "/home"
+		}
+
+		nombrestr := r.FormValue("nombre")
+		nombre, err := strconv.ParseFloat(nombrestr, 64)
+		if err != nil {
+			http.Error(w, "Erreur de convertion", http.StatusInternalServerError)
+			return
+		}
+		prixstr := r.FormValue("prix")
+		prix, err := strconv.ParseFloat(prixstr, 64)
+		if err != nil {
+			http.Error(w, "Erreur de convertion", http.StatusInternalServerError)
+			return
+		}
+
+		l := models.Liste{
+			Aliment: r.FormValue("aliment"),
+			Nombre:  nombre,
+			Prix:    prix,
+			Unite:   r.FormValue("unite"),
+		}
+
+		_, err = db.Exec("INSERT INTO liste (id_users, aliment, nombre, unite, prix) VALUES (?,?,?,?,?)", &sess.Userid, &l.Aliment, &l.Nombre, &l.Unite, &l.Prix)
+		if err != nil {
+			http.Error(w, "Erreur de insert", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, referer, http.StatusSeeOther)
+	default:
+		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func listeDelete(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			return
+		}
+
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			return
+		}
+
+		referer := r.Header.Get("Referer")
+		if referer == "" {
+			referer = "/home"
+		}
+
+		idstr := r.FormValue("id")
+
+		id, err := strconv.Atoi(idstr)
+		if err != nil {
+			http.Error(w, "erreur de conv", http.StatusInternalServerError)
+		}
+
+		_, err = db.Exec("DELETE FROM liste WHERE id_users = ? AND id = ?", &sess.Userid, &id)
+		if err != nil {
+			http.Error(w, "erreur de delete", http.StatusInternalServerError)
+		}
+
+		http.Redirect(w, r, referer, http.StatusSeeOther)
+	default:
+		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
 func main() {
 	err = godotenv.Load(".env")
 	if err != nil {
 		log.Fatal("erreur .env", err)
 	}
 
-	if loadCategorieAPI(os.Getenv("API_CAT")); err != nil {
-		fmt.Println("load api cat", err)
-		return
+	if err = loadCategorieAPI(os.Getenv("API_CAT")); err != nil {
+		log.Printf("API cat warning: %v", err)
 	}
 
 	db, err = connectDB()
 	if err != nil {
 		log.Fatal("erreur db connexion", err)
 	}
+	defer db.Close()
 
 	tpl, err = parseTemplates()
 	if err != nil {
 		log.Fatal("erreur template", err)
 	}
 
+	// ✅ ROUTES SANS CHI (plus simple, fonctionne direct)
 	http.HandleFunc("/", acceuilHandle)
 	http.HandleFunc("/login", loginHandle)
 	http.HandleFunc("/register", registerhandle)
 	http.HandleFunc("/verify", verifyHandle)
-	http.HandleFunc("/home", homeHandle)
-	http.HandleFunc("/categorie", categorieHandle)
-	http.HandleFunc("/meals", recetteHandle)
-	http.HandleFunc("/search", searchHandle)
-	http.HandleFunc("/addfavoris", addfavorisHandle)
-	http.HandleFunc("/favoris", favorisHandle)
-	http.HandleFunc("/deletefavoris", deletefavorisHandle)
 
-	log.Println("serveur sur http://localhost:8080 ")
-	http.ListenAndServe(":8080", nil)
+	// ✅ Routes protégées (session manuelle)
+	http.HandleFunc("/home", requireAuth(homeHandle))
+	http.HandleFunc("/categorie", requireAuth(categorieHandle))
+	http.HandleFunc("/meals", requireAuth(recetteHandle))
+	http.HandleFunc("/search", searchHandle)
+	http.HandleFunc("/addfavoris", requireAuth(addfavorisHandle))
+	http.HandleFunc("/favoris", requireAuth(favorisHandle))
+	http.HandleFunc("/deletefavoris", requireAuth(deletefavorisHandle))
+	http.HandleFunc("/addcommentaire", requireAuth(addCom))
+	http.HandleFunc("/deletecommentaire", requireAuth(deleteCom))
+	http.HandleFunc("/liste", requireAuth(listeHandle))
+	http.HandleFunc("/liste/add", requireAuth(ListeAdd))
+	http.HandleFunc("/liste/update", listeUpdate) // ✅ CHECKBOX UPDATE !
+	http.HandleFunc("/liste/delete", listeDelete)
+
+	log.Println("🚀 Serveur sur http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+// ✅ MIDDLEWARE SIMPLE (fonctionne sans Chi)
+func requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		sess, exists := sessions[c.Value]
+		if !exists || time.Now().After(sess.Expiry) {
+			delete(sessions, c.Value)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next(w, r)
+	}
 }
