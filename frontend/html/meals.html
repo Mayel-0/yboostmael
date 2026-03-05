@@ -1,58 +1,191 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YCuisine</title>
+  <title>YCuisine - Recette</title>
+  <link rel="stylesheet" href="/CSS/style.css">
 </head>
-<body>
-  <main>
+<body style="background: var(--bg-secondary);">
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/home" class="logo">🍽️ YCuisine</a>
+      <ul class="nav-links">
+        <li><a href="/home">🏠 Accueil</a></li>
+        <li><a href="/favoris">❤️ Favoris</a></li>
+        <li><a href="/liste">🛒 Liste de courses</a></li>
+        <li><a href="/logout" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Déconnexion</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Recipe Detail -->
+  <div class="container">
     {{range .Recette}}
-      <img height="260" width="260" src="{{.Thumb}}">
-      <h1>{{.Name}}</h1>
-      <h2>{{.NameAlternet}}</h2>
-      <p><strong>categorie : </strong>{{.Categorie}}</p>
-      <p><strong>origine : </strong>{{.Origine}}</p>
-      <label><strong>instruction : </strong></label>
-      <p>{{.Instruction}}</p>
-      <p><strong>Tags : </strong>{{.Tags}}</p>
-      {{if .Youtube}}
-      <div class="containeurYoutube">
-        <iframe width="620" height="515" title="{{.Name}}" src="{{.YoutubeEmbed}}" allowfullscreen></iframe>
+      <div class="recipe-detail">
+        <!-- Recipe Header with Image -->
+        <div class="recipe-header">
+          <img src="{{.Thumb}}" alt="{{.Name}}">
+          <div class="recipe-title-overlay">
+            <h1>{{.Name}}</h1>
+            {{if .NameAlternet}}
+              <p style="font-size: 1.2rem; opacity: 0.9;">{{.NameAlternet}}</p>
+            {{end}}
+          </div>
+        </div>
+
+        <!-- Recipe Body -->
+        <div class="recipe-body">
+          <!-- Meta Information -->
+          <div class="recipe-meta">
+            {{if .Categorie}}
+              <div class="recipe-meta-item">
+                <span style="font-size: 1.5rem;">🍴</span>
+                <strong>Catégorie:</strong> <span>{{.Categorie}}</span>
+              </div>
+            {{end}}
+            {{if .Origine}}
+              <div class="recipe-meta-item">
+                <span style="font-size: 1.5rem;">🌍</span>
+                <strong>Origine:</strong> <span>{{.Origine}}</span>
+              </div>
+            {{end}}
+            {{if .Tags}}
+              <div class="recipe-meta-item">
+                <span style="font-size: 1.5rem;">🏷️</span>
+                <strong>Tags:</strong> <span>{{.Tags}}</span>
+              </div>
+            {{end}}
+          </div>
+
+          <!-- Instructions -->
+          {{if .Instruction}}
+            <div style="margin-bottom: 2rem;">
+              <h3 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--primary-color);">
+                📝 Instructions
+              </h3>
+              <div class="recipe-instructions">
+                {{.Instruction}}
+              </div>
+            </div>
+          {{end}}
+
+          <!-- YouTube Video -->
+          {{if .Youtube}}
+            <div style="margin-bottom: 2rem;">
+              <h3 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--primary-color);">
+                🎥 Vidéo de la recette
+              </h3>
+              <div class="youtube-container">
+                <iframe
+                  width="620"
+                  height="515"
+                  title="{{.Name}}"
+                  src="{{.YoutubeEmbed}}"
+                  allowfullscreen
+                  frameborder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                ></iframe>
+              </div>
+            </div>
+          {{end}}
+
+          <!-- Add to Favorites Button -->
+          <div style="text-align: center; margin: 2rem 0;">
+            <form action="/addfavoris" method="post" style="display: inline-block;">
+              <input type="hidden" name="id" value="{{.Id}}">
+              <input type="hidden" name="name" value="{{.Name}}">
+              <input type="hidden" name="categorie" value="{{.Categorie}}">
+              <input type="hidden" name="origine" value="{{.Origine}}">
+              <input type="hidden" name="Thumb" value="{{.Thumb}}">
+              <button type="submit" class="btn btn-primary" style="font-size: 1.1rem; padding: 1rem 2rem;">
+                ❤️ Ajouter aux favoris
+              </button>
+            </form>
+          </div>
+
+          <!-- Comments Section -->
+          <div class="comments-section">
+            <h3 style="font-size: 1.8rem; margin-bottom: 1.5rem; color: var(--primary-color);">
+              💬 Commentaires
+            </h3>
+
+            <!-- Display Comments -->
+            {{if $.Listecommentaire}}
+              <div style="margin-bottom: 2rem;">
+                {{range $.Listecommentaire}}
+                  <div class="comment">
+                    <p class="comment-text">{{.Data_string}}</p>
+                    {{if eq .Users_id $.User_id}}
+                      <div class="comment-actions">
+                        <form action="/deletecommentaire" method="post" style="display:inline;">
+                          <input type="hidden" name="id" value="{{.Id}}"/>
+                          <button type="submit" class="btn-delete" onclick="return confirm('Supprimer ce commentaire ?')">
+                            🗑️ Supprimer
+                          </button>
+                        </form>
+                      </div>
+                    {{end}}
+                  </div>
+                {{end}}
+              </div>
+            {{else}}
+              <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem; padding: 2rem; background: var(--light-color); border-radius: var(--radius-md);">
+                Aucun commentaire pour le moment. Soyez le premier à commenter !
+              </p>
+            {{end}}
+
+            <!-- Add Comment Form -->
+            <div style="background: var(--light-color); padding: 1.5rem; border-radius: var(--radius-md);">
+              <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Ajouter un commentaire</h4>
+              <form action="/addcommentaire" method="post">
+                <div class="form-group">
+                  <textarea
+                    name="data"
+                    placeholder="Partagez votre expérience avec cette recette..."
+                    required
+                    style="width: 100%; padding: 1rem; border: 2px solid #E0E0E0; border-radius: var(--radius-sm); font-size: 1rem; min-height: 100px; resize: vertical;"
+                  ></textarea>
+                </div>
+                <input type="hidden" name="id" value="{{.Id}}"/>
+                <button type="submit" class="btn btn-success">
+                  ✉️ Envoyer le commentaire
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
       </div>
-      {{end}}
-
-      <form action="/addfavoris" method="post">
-        <input type="hidden" name="id" value="{{.Id}}">
-        <input type="hidden" name="name" value="{{.Name}}">
-        <input type="hidden" name="categorie" value="{{.Categorie}}">
-        <input type="hidden" name="origine" value="{{.Origine}}">
-        <input type="hidden" name="Thumb" value="{{.Thumb}}">
-        <button type="submit">ajouter au favoris</button>
-      </form>
     {{end}}
+  </div>
 
-    <h2>Commentaires</h2>
-    {{range $.Listecommentaire}}
-      <div class="commentaire">
-        <p>{{.Data_string}}</p>
-        {{if eq .Users_id $.User_id}}
-        <form action="/deletecommentaire" method="post" style="display:inline;">
-          <input type="hidden" name="id" value="{{.Id}}"/>
-          <button type="submit" onclick="return confirm('Supprimer ce commentaire ?')">Supprimer</button>
-        </form>
-        {{end}}
-      </div>
-    {{end}}
+  <script>
+    // Animation d'entrée
+    const recipeDetail = document.querySelector('.recipe-detail');
+    if (recipeDetail) {
+      recipeDetail.style.opacity = '0';
+      recipeDetail.style.transform = 'translateY(30px)';
 
-    <h3>Ajouter un commentaire</h3>
-    {{range .Recette}}
-    <form action="/addcommentaire" method="post">
-      <input type="text" name="data" placeholder="Ton commentaire" required>
-      <input type="hidden" name="id" value="{{.Id}}"/>
-      <button type="submit">Envoyer</button>
-    </form>
-    {{end}}
-  </main>
+      setTimeout(() => {
+        recipeDetail.style.transition = 'all 0.6s ease';
+        recipeDetail.style.opacity = '1';
+        recipeDetail.style.transform = 'translateY(0)';
+      }, 100);
+    }
+
+    // Animation des commentaires
+    const comments = document.querySelectorAll('.comment');
+    comments.forEach((comment, index) => {
+      comment.style.opacity = '0';
+      comment.style.transform = 'translateX(-20px)';
+
+      setTimeout(() => {
+        comment.style.transition = 'all 0.4s ease';
+        comment.style.opacity = '1';
+        comment.style.transform = 'translateX(0)';
+      }, 200 + (index * 100));
+    });
+  </script>
 </body>
 </html>

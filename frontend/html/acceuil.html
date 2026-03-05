@@ -1,17 +1,134 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YCuisine</title>
+  <title>YCuisine - Bienvenue dans l'univers de la cuisine</title>
+  <link rel="stylesheet" href="/CSS/style.css">
 </head>
 <body>
-  <h1>Bonjour</h1>
-  <a href="/login">
-    <button>login</button>
-  </a>
-  <a href="/register">
-    <button>register</button>
-  </a>
+  <!-- Hero Section -->
+  <div class="hero">
+    <div class="hero-content">
+      <h1>🍽️ YCuisine</h1>
+      <p>Découvrez des milliers de recettes du monde entier</p>
+      <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 2rem;">
+        Cuisinez, partagez, savourez ! 🌟
+      </p>
+      <div class="button-group">
+        <a href="/login" class="btn btn-primary">
+          👤 Se connecter
+        </a>
+        <a href="/register" class="btn btn-secondary">
+          ✨ Créer un compte
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Features Section -->
+  <div class="container">
+    <h2 class="section-title">Pourquoi YCuisine ?</h2>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-content">
+          <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">📚</div>
+          <h3 class="card-title text-center">Milliers de Recettes</h3>
+          <p class="card-description text-center">
+            Explorez une bibliothèque immense de recettes du monde entier, des plus simples aux plus raffinées.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-content">
+          <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">❤️</div>
+          <h3 class="card-title text-center">Vos Favoris</h3>
+          <p class="card-description text-center">
+            Sauvegardez vos recettes préférées et retrouvez-les en un clic quand vous en avez besoin.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-content">
+          <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">🛒</div>
+          <h3 class="card-title text-center">Liste de Courses</h3>
+          <p class="card-description text-center">
+            Créez automatiquement votre liste de courses à partir des ingrédients de vos recettes.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-content">
+          <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">🌍</div>
+          <h3 class="card-title text-center">Cuisine du Monde</h3>
+          <p class="card-description text-center">
+            Voyagez culinairement avec des recettes italiennes, asiatiques, françaises et bien plus !
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-content">
+          <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">💬</div>
+          <h3 class="card-title text-center">Communauté</h3>
+          <p class="card-description text-center">
+            Partagez vos avis et astuces avec d'autres passionnés de cuisine.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-content">
+          <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">🎯</div>
+          <h3 class="card-title text-center">Facile à Utiliser</h3>
+          <p class="card-description text-center">
+            Interface intuitive et moderne pour une expérience agréable et fluide.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CTA Section -->
+  <div class="container" style="text-align: center; padding: 4rem 1rem;">
+    <h2 class="section-title">Prêt à commencer votre aventure culinaire ?</h2>
+    <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 2rem;">
+      Rejoignez notre communauté de passionnés de cuisine dès aujourd'hui !
+    </p>
+    <div class="button-group" style="justify-content: center;">
+      <a href="/register" class="btn btn-primary" style="font-size: 1.2rem; padding: 1rem 2rem;">
+        🚀 Commencer maintenant
+      </a>
+    </div>
+  </div>
+
+  <script>
+    // Animation au scroll
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, index) => {
+        if (entry.isIntersecting) {
+          setTimeout(() => {
+            entry.target.style.opacity = '1';
+            entry.target.style.transform = 'translateY(0)';
+          }, index * 100);
+        }
+      });
+    }, observerOptions);
+
+    document.querySelectorAll('.card').forEach((card) => {
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(30px)';
+      card.style.transition = 'all 0.5s ease';
+      observer.observe(card);
+    });
+  </script>
 </body>
 </html>

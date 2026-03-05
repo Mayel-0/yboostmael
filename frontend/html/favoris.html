@@ -1,21 +1,107 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YCuisine</title>
+  <title>YCuisine - Mes Favoris</title>
+  <link rel="stylesheet" href="/CSS/style.css">
 </head>
 <body>
-  {{range .Favorisliste}}
-    <a href="/meals?recette={{.Id}}">
-      <h2>{{.Name}}</h2>
-      <img height="260" width="260" src="{{.Thumb}}"/>
-    </a>
-    <form action="/deletefavoris" method="post">
-      <input type="hidden" name="id" value="{{.Id}}"/>
-      <input type="hidden" name="name" value="{{.Name}}"/>
-      <button type="submit">supprimer</button>
-    </form>
-  {{end}}
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/home" class="logo">🍽️ YCuisine</a>
+      <ul class="nav-links">
+        <li><a href="/home">🏠 Accueil</a></li>
+        <li><a href="/favoris" style="color: var(--primary-color);">❤️ Favoris</a></li>
+        <li><a href="/liste">🛒 Liste de courses</a></li>
+        <li><a href="/logout" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Déconnexion</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Favorites Section -->
+  <div class="container">
+    <h2 class="section-title">❤️ Mes Recettes Favorites</h2>
+
+    {{if .Favorisliste}}
+      <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+        Vous avez {{len .Favorisliste}} recette(s) dans vos favoris
+      </p>
+
+      <div class="card-grid">
+        {{range .Favorisliste}}
+          <div class="card" style="position: relative;">
+            <a href="/meals?recette={{.Id}}" style="text-decoration: none; color: inherit;">
+              <img src="{{.Thumb}}" alt="{{.Name}}" class="card-image">
+              <div class="card-content">
+                <h3 class="card-title">{{.Name}}</h3>
+                <div class="card-tags">
+                  {{if .Categorie}}
+                    <span class="tag">{{.Categorie}}</span>
+                  {{end}}
+                  {{if .Origine}}
+                    <span class="tag">{{.Origine}}</span>
+                  {{end}}
+                </div>
+              </div>
+            </a>
+            <form action="/deletefavoris" method="post" style="padding: 0 1rem 1rem;">
+              <input type="hidden" name="id" value="{{.Id}}"/>
+              <input type="hidden" name="name" value="{{.Name}}"/>
+              <button
+                type="submit"
+                class="btn btn-secondary"
+                style="width: 100%; justify-content: center;"
+                onclick="return confirm('Retirer {{.Name}} de vos favoris ?')"
+              >
+                🗑️ Retirer des favoris
+              </button>
+            </form>
+          </div>
+        {{end}}
+      </div>
+    {{else}}
+      <!-- Empty State -->
+      <div style="text-align: center; padding: 4rem 1rem;">
+        <div style="font-size: 6rem; margin-bottom: 1rem; opacity: 0.3;">💔</div>
+        <h3 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--text-primary);">
+          Aucun favori pour le moment
+        </h3>
+        <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 2rem;">
+          Explorez nos recettes et ajoutez celles que vous aimez !
+        </p>
+        <a href="/home" class="btn btn-primary" style="font-size: 1.1rem;">
+          🔍 Découvrir des recettes
+        </a>
+      </div>
+    {{end}}
+  </div>
+
+  <script>
+    // Animation au scroll
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, index) => {
+        if (entry.isIntersecting) {
+          setTimeout(() => {
+            entry.target.style.opacity = '1';
+            entry.target.style.transform = 'translateY(0)';
+          }, index * 50);
+        }
+      });
+    }, observerOptions);
+
+    document.querySelectorAll('.card').forEach((card) => {
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(30px)';
+      card.style.transition = 'all 0.5s ease';
+      observer.observe(card);
+    });
+  </script>
 </body>
 </html>

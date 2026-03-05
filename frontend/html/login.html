@@ -1,23 +1,86 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YCuisine</title>
+  <title>YCuisine - Connexion</title>
+  <link rel="stylesheet" href="/CSS/style.css">
 </head>
-<body>
-  <h1>login</h1>
-  <form action="/login" method="post">
-    <label for="email">Email d'utilisateur</label>
-    <input type="text" name="email" required>
+<body style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #FFF8F0 0%, #FFE8CC 100%);">
 
-    <label for="password">mot de passe utilisateur</label>
-    <input type="password" name="password" required>
+  <div class="form-container">
+    <div style="text-align: center; margin-bottom: 2rem;">
+      <a href="/" style="text-decoration: none;">
+        <h1 class="logo" style="font-size: 2.5rem; margin-bottom: 0.5rem;">🍽️ YCuisine</h1>
+      </a>
+    </div>
 
-    <button type="submit">login</button>
-  </form>
-  {{if .Errmsg}}
-      <p>{{.Errmsg}}</p>
-  {{end}}
+    <h2 class="form-title">Connexion</h2>
+
+    <form action="/login" method="post">
+      <div class="form-group">
+        <label for="email">📧 Email</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="votre@email.com"
+          required
+          autocomplete="email"
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="password">🔒 Mot de passe</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          placeholder="••••••••"
+          required
+          autocomplete="current-password"
+        >
+      </div>
+
+      {{if .Errmsg}}
+        <div class="error-message">
+          ⚠️ {{.Errmsg}}
+        </div>
+      {{end}}
+
+      <div style="margin-top: 1.5rem;">
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+          Se connecter
+        </button>
+      </div>
+    </form>
+
+    <div style="text-align: center; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #E0E0E0;">
+      <p style="color: var(--text-secondary);">
+        Pas encore de compte ?
+        <a href="/register" style="color: var(--primary-color); text-decoration: none; font-weight: 600;">
+          Créer un compte
+        </a>
+      </p>
+      <p style="color: var(--text-secondary); margin-top: 0.5rem;">
+        <a href="/" style="color: var(--text-secondary); text-decoration: none;">
+          ← Retour à l'accueil
+        </a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // Animation d'entrée
+    const formContainer = document.querySelector('.form-container');
+    formContainer.style.opacity = '0';
+    formContainer.style.transform = 'translateY(30px)';
+
+    setTimeout(() => {
+      formContainer.style.transition = 'all 0.5s ease';
+      formContainer.style.opacity = '1';
+      formContainer.style.transform = 'translateY(0)';
+    }, 100);
+  </script>
 </body>
 </html>

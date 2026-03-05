@@ -1,28 +1,109 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YCuisine</title>
+  <title>YCuisine - Catégorie</title>
+  <link rel="stylesheet" href="/CSS/style.css">
 </head>
 <body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/home" class="logo">🍽️ YCuisine</a>
+      <ul class="nav-links">
+        <li><a href="/home">🏠 Accueil</a></li>
+        <li><a href="/favoris">❤️ Favoris</a></li>
+        <li><a href="/liste">🛒 Liste de courses</a></li>
+        <li><a href="/logout" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Déconnexion</a></li>
+      </ul>
+    </div>
+  </nav>
 
-  <form action="/search" method="post">
-    <label for="search">recherche :</label>
-    <input name="name" id="search" list="recette">
-  </form>
+  <!-- Search Section -->
+  <div class="container" style="margin-top: 2rem;">
+    <div class="search-container">
+      <form action="/search" method="post">
+        <input
+          type="text"
+          name="name"
+          id="search"
+          list="recette"
+          class="search-input"
+          placeholder="🔍 Rechercher une recette..."
+        >
+        <datalist id="recette">
+          {{range .Listfood}}
+            <option value="{{.Name}}">
+          {{end}}
+        </datalist>
+      </form>
+    </div>
+  </div>
 
-    <datalist id="recette">
-      {{range .Listfood}}
-        <option value="{{.Name}}">
+  <!-- Recipes Grid -->
+  <div class="container">
+    <h2 class="section-title">
+      {{if .Listfood}}
+        Résultats de recherche
+      {{else}}
+        Recettes
       {{end}}
-    </datalist>
+    </h2>
+    <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+      {{if .Listfood}}
+        {{len .Listfood}} recette(s) trouvée(s)
+      {{end}}
+    </p>
 
-  {{range .Listfood}}
-    <a href="/meals?recette={{.Id}}">
-      <h2>{{.Name}}</h2>
-      <img height="260" width="260" src="{{.Thumb}}"/>
-    </a>
-  {{end}}
+    <div class="card-grid">
+      {{range .Listfood}}
+        <a href="/meals?recette={{.Id}}" style="text-decoration: none; color: inherit;">
+          <div class="card">
+            <img src="{{.Thumb}}" alt="{{.Name}}" class="card-image">
+            <div class="card-content">
+              <h3 class="card-title">{{.Name}}</h3>
+            </div>
+          </div>
+        </a>
+      {{else}}
+        <div style="grid-column: 1/-1; text-align: center; padding: 3rem;">
+          <div style="font-size: 5rem; margin-bottom: 1rem;">🔍</div>
+          <p style="font-size: 1.2rem; color: var(--text-secondary);">
+            Aucune recette trouvée. Essayez une autre recherche !
+          </p>
+        </div>
+      {{end}}
+    </div>
+  </div>
+
+  <script>
+    // Animation au scroll
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, index) => {
+        if (entry.isIntersecting) {
+          setTimeout(() => {
+            entry.target.style.opacity = '1';
+            entry.target.style.transform = 'translateY(0)';
+          }, index * 50);
+        }
+      });
+    }, observerOptions);
+
+    document.querySelectorAll('.card').forEach((card) => {
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(30px)';
+      card.style.transition = 'all 0.5s ease';
+      observer.observe(card);
+    });
+
+    // Focus automatique sur la barre de recherche
+    document.getElementById('search').focus();
+  </script>
 </body>
 </html>

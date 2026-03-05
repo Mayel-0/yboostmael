@@ -3,61 +3,322 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YCuisine</title>
+  <title>YCuisine - Liste de Courses</title>
+  <link rel="stylesheet" href="/CSS/style.css">
   <style>
-    .LigneListe {
+    .shopping-list-item {
+      background: white;
+      padding: 1.5rem;
+      border-radius: var(--radius-md);
+      margin-bottom: 1rem;
+      box-shadow: var(--shadow-sm);
       display: flex;
-      gap: 10px;
       align-items: center;
-      padding: 10px;
-      border-bottom: 1px solid #eee;
+      gap: 1rem;
+      transition: var(--transition-fast);
+      border-left: 4px solid var(--primary-color);
+    }
+
+    .shopping-list-item:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateX(5px);
+    }
+
+    .shopping-list-item.completed {
+      opacity: 0.7;
+      border-left-color: var(--success-color);
+      background: #f8f9fa;
+    }
+
+    .item-checkbox {
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      accent-color: var(--success-color);
+    }
+
+    .item-content {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .item-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .item-details {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    .item-badge {
+      padding: 0.25rem 0.75rem;
+      background: var(--light-color);
+      border-radius: var(--radius-full);
+      font-weight: 500;
+    }
+
+    .item-status {
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .status-pending {
+      background: #FFF3E0;
+      color: #F57C00;
+    }
+
+    .status-done {
+      background: #E8F5E9;
+      color: #2E7D32;
+    }
+
+    .delete-btn {
+      background: var(--error-color);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: var(--transition-fast);
+      font-weight: 600;
+    }
+
+    .delete-btn:hover {
+      background: #c0392b;
+      transform: scale(1.05);
+    }
+
+    .total-section {
+      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+      color: white;
+      padding: 2rem;
+      border-radius: var(--radius-lg);
+      text-align: center;
+      margin: 2rem 0;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .total-section h2 {
+      font-size: 2.5rem;
+      margin: 0;
+    }
+
+    .add-item-form {
+      background: white;
+      padding: 2rem;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      margin-top: 2rem;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 768px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .item-content {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
   </style>
 </head>
 <body>
-  <main>
-    {{range .Liste}}
-    <form action="/liste/update" method="POST" class="update-form">
-      <div class="LigneListe">
-        <label>{{.Aliment}}</label>
-        <label>{{.Nombre}} {{.Unite}} / {{.Prix}} 💵</label>
-        <input type="hidden" name="id" value="{{.Id}}">
-        <input type="checkbox"
-               name="is_finish"
-               value="1"
-               {{if .Is_finish}}checked{{end}}
-               onchange="this.form.submit()">
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/home" class="logo">🍽️ YCuisine</a>
+      <ul class="nav-links">
+        <li><a href="/home">🏠 Accueil</a></li>
+        <li><a href="/favoris">❤️ Favoris</a></li>
+        <li><a href="/liste" style="color: var(--primary-color);">🛒 Liste de courses</a></li>
+        <li><a href="/logout" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Déconnexion</a></li>
+      </ul>
+    </div>
+  </nav>
 
-        <!-- ✅ Statut visuel -->
-        <span style="color: {{if .Is_finish}}green{{else}}orange{{end}};">
-          {{if .Is_finish}}✓ Terminé{{else}}⏳ En cours{{end}}
-        </span>
+  <!-- Shopping List -->
+  <div class="container">
+    <h2 class="section-title">🛒 Ma Liste de Courses</h2>
+
+    {{if .Liste}}
+      <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+        {{len .Liste}} article(s) dans votre liste
+      </p>
+
+      <!-- Liste des articles -->
+      <div style="margin-bottom: 2rem;">
+        {{range .Liste}}
+          <div class="shopping-list-item {{if .Is_finish}}completed{{end}}">
+            <form action="/liste/update" method="POST" class="update-form" style="display: contents;">
+              <input type="hidden" name="id" value="{{.Id}}">
+              <input
+                type="checkbox"
+                name="is_finish"
+                value="1"
+                class="item-checkbox"
+                {{if .Is_finish}}checked{{end}}
+                onchange="this.form.submit()"
+              >
+            </form>
+
+            <div class="item-content">
+              <div>
+                <div class="item-name">{{.Aliment}}</div>
+                <div class="item-details">
+                  <span class="item-badge">📦 {{.Nombre}} {{.Unite}}</span>
+                  <span class="item-badge">💰 {{printf "%.2f" .Prix}} €</span>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 1rem; align-items: center;">
+                <span class="item-status {{if .Is_finish}}status-done{{else}}status-pending{{end}}">
+                  {{if .Is_finish}}✓ Acheté{{else}}⏳ À acheter{{end}}
+                </span>
+
+                <form action="/liste/delete" method="post">
+                  <input type="hidden" name="id" value="{{.Id}}"/>
+                  <button type="submit" class="delete-btn" onclick="return confirm('Supprimer cet article ?')">
+                    🗑️
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        {{end}}
       </div>
-    </form>
-    <form action="/liste/delete" method="post">
-      <input type="hidden" name="id" value="{{.Id}}"/>
-      <button type="submit">X</button>
-    </form>
+
+      <!-- Prix Total -->
+      <div class="total-section">
+        <p style="margin: 0; font-size: 1.2rem; opacity: 0.9;">Prix Total</p>
+        <h2>{{printf "%.2f" .PrixTotal}} €</h2>
+      </div>
+    {{else}}
+      <!-- Empty State -->
+      <div style="text-align: center; padding: 3rem 1rem;">
+        <div style="font-size: 6rem; margin-bottom: 1rem; opacity: 0.3;">🛒</div>
+        <h3 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--text-primary);">
+          Votre liste est vide
+        </h3>
+        <p style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 2rem;">
+          Commencez à ajouter des articles à votre liste de courses !
+        </p>
+      </div>
     {{end}}
 
-    <h2>Prix Total : {{printf "%.2f" .PrixTotal}} 💶</h2>
+    <!-- Formulaire d'ajout -->
+    <div class="add-item-form">
+      <h3 style="margin-bottom: 1.5rem; color: var(--primary-color);">➕ Ajouter un article</h3>
+      <form action="/liste/add" method="post">
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="aliment">🍎 Aliment</label>
+            <input
+              type="text"
+              id="aliment"
+              name="aliment"
+              placeholder="Ex: Tomates"
+              required
+            >
+          </div>
 
-    <!-- Formulaire d'ajout (PARFAIT tel quel) -->
-    <form action="/liste/add" method="post" style="margin-top: 20px;">
-      <input type="text" name="aliment" placeholder="Aliment..." required>
-      <input type="number" name="nombre" step="0.01" min="0" placeholder="0.00" required>
-      <input type="text" name="unite" list="uniter" placeholder="kg">
-      <input type="number" name="prix" step="0.01" min="0" placeholder="0.00" required>
-      <button type="submit">Ajouter à la liste</button>
-    </form>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="nombre">📊 Quantité</label>
+            <input
+              type="number"
+              id="nombre"
+              name="nombre"
+              step="0.01"
+              min="0"
+              placeholder="1.5"
+              required
+            >
+          </div>
 
-    <datalist id="uniter">
-      <option value="g">
-      <option value="kg">
-      <option value="ml">
-      <option value="L">
-      <option value="u (unité)">
-    </datalist>
-  </main>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="unite">📏 Unité</label>
+            <input
+              type="text"
+              id="unite"
+              name="unite"
+              list="uniter"
+              placeholder="kg"
+            >
+            <datalist id="uniter">
+              <option value="g">
+              <option value="kg">
+              <option value="ml">
+              <option value="L">
+              <option value="u (unité)">
+            </datalist>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="prix">💰 Prix (€)</label>
+            <input
+              type="number"
+              id="prix"
+              name="prix"
+              step="0.01"
+              min="0"
+              placeholder="2.50"
+              required
+            >
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
+          ➕ Ajouter à la liste
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // Animation au chargement
+    const items = document.querySelectorAll('.shopping-list-item');
+    items.forEach((item, index) => {
+      item.style.opacity = '0';
+      item.style.transform = 'translateX(-20px)';
+
+      setTimeout(() => {
+        item.style.transition = 'all 0.4s ease';
+        item.style.opacity = '1';
+        item.style.transform = 'translateX(0)';
+      }, index * 50);
+    });
+
+    // Animation du total
+    const totalSection = document.querySelector('.total-section');
+    if (totalSection) {
+      totalSection.style.opacity = '0';
+      totalSection.style.transform = 'scale(0.95)';
+
+      setTimeout(() => {
+        totalSection.style.transition = 'all 0.5s ease';
+        totalSection.style.opacity = '1';
+        totalSection.style.transform = 'scale(1)';
+      }, items.length * 50 + 200);
+    }
+  </script>
 </body>
 </html>
