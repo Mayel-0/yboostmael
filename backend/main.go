@@ -414,8 +414,10 @@ func ApiSearch(url string) error {
 func searchHandle(w http.ResponseWriter, r *http.Request) {
 	data := models.Pagedata{}
 	namestr := r.FormValue("name")
+	print(namestr)
 	encoded := url.QueryEscape(namestr)
 	url := os.Getenv("API_SEARCH") + encoded
+	print(url)
 
 	err = ApiSearch(url)
 	if err != nil {
@@ -676,6 +678,7 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 
 		referer := r.Header.Get("Referer")
+		print(referer)
 		if referer == "" {
 			referer = "/" // Fallback si pas de referer
 		}
@@ -999,6 +1002,10 @@ func main() {
 	if err != nil {
 		log.Fatal("erreur template", err)
 	}
+
+	// ✅ Servir les fichiers statiques (CSS, JS, images, etc.)
+	fs := http.FileServer(http.Dir("../frontend"))
+	http.Handle("/CSS/", http.StripPrefix("/", fs))
 
 	// ✅ ROUTES SANS CHI (plus simple, fonctionne direct)
 	http.HandleFunc("/", acceuilHandle)
