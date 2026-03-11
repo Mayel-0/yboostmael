@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/gomail.v2"
 
@@ -102,17 +104,28 @@ func parseTemplates() (*template.Template, error) {
 	}
 	return tpl, nil
 }
-
 func connectDB() (*sql.DB, error) {
-	dsn := os.Getenv("DB_DSN")
-	db, err = sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return nil, fmt.Errorf("DATABASE_URL manquante")
 	}
 
-	if err = db.Ping(); err != nil {
-		return nil, err
+	// ✅ Driver PostgreSQL (pgx recommandé)
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("erreur ouverture DB: %w", err)
 	}
+
+	// Test connexion avec timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err = db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("connexion DB échouée: %w", err)
+	}
+
+	log.Println("✅ DB Supabase connectée!")
 	return db, nil
 }
 
