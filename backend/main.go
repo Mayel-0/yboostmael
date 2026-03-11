@@ -1024,8 +1024,10 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("🚀 Serveur lancé sur le port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Printf("🚀 Serveur prêt sur le port %s", port)
+
+	// TRÈS IMPORTANT : il faut que l'app écoute sur 0.0.0.0 pour Render
+	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, nil))
 }
 
 // ✅ MIDDLEWARE SIMPLE (fonctionne sans Chi)
