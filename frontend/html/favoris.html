@@ -46,7 +46,7 @@
                 </div>
               </div>
             </a>
-            <form action="/deletefavoris" method="post" style="padding: 0 1rem 1rem;">
+            <form action="/deletefavoris" method="post" style="padding: 0 1rem 1rem; position: relative; z-index: 10;">
               <input type="hidden" name="id" value="{{.Id}}"/>
               <input type="hidden" name="name" value="{{.Name}}"/>
               <button

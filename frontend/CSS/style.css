@@ -375,6 +375,7 @@ body {
   opacity: 0;
   transition: var(--transition-normal);
   z-index: 1;
+  pointer-events: none;
 }
 
 .card:hover::before {
@@ -624,6 +625,13 @@ body {
   margin-top: var(--spacing-xl);
   padding-top: var(--spacing-xl);
   border-top: 2px solid var(--light-color);
+}
+
+.container__commentaire {
+  display: flex;
+  h2 {
+    color: var(--secondary-color);
+  }
 }
 
 .comment {

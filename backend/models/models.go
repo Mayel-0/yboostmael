@@ -32,6 +32,8 @@ type Commentaire struct {
 	Users_id    int    `db:"users_id"`
 	Data_string string `db:"data_string"`
 	Meal_id     int    `db:"meal_id"`
+	First_name  string `db:"first_name"`
+	Last_name   string `db:"last_name"`
 }
 
 type Favoris struct {

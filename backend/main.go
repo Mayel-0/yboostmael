@@ -15,7 +15,6 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/gomail.v2"
 
@@ -33,7 +32,6 @@ var ApiFoodlist []models.Food_affichage
 var ApiRecette []models.Recette
 
 func SendEmail(to, subject, body string) error {
-	// Récupération de la config SMTP dans les variables d'environnement.
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPortStr := os.Getenv("SMTP_PORT")
 	smtpUser := os.Getenv("SMTP_USER")
@@ -44,7 +42,6 @@ func SendEmail(to, subject, body string) error {
 		return fmt.Errorf("configuration SMTP manquante (vérifie SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM)")
 	}
 
-	// Conversion du port en int.
 	var smtpPort int
 	_, err := fmt.Sscanf(smtpPortStr, "%d", &smtpPort)
 	if err != nil {
@@ -173,11 +170,11 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 		expiresAt := time.Now().Add(5 * time.Minute)
 
 		println("voici le code : ", Code)
-		/*err = SendVerificationEmail(email, Code)
+		err = SendVerificationEmail(p.Email, Code)
 		if err != nil {
 			fmt.Println("erreur dans l'envoie du mail")
 			return
-		}*/
+		}
 
 		_, err = db.Query("INSERT INTO email_verification (users_id, verify_token, verify_expires_at, is_verified) VALUES (?,?,?,0)", &p.Id, &Code, &expiresAt)
 		if err != nil {
@@ -194,6 +191,7 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func registerhandle(w http.ResponseWriter, r *http.Request) {
+	var emailListe []string
 	var p models.Users
 	data := models.Pagedata{}
 	switch r.Method {
@@ -214,6 +212,26 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		p.LastName = r.FormValue("lastname")
 		password := r.FormValue("password")
 		passwordV := r.FormValue("passwordV")
+
+		rows, err := db.Query("SELECT email FROM users")
+		if err != nil {
+			http.Error(w, "probleme de communications", http.StatusInternalServerError)
+		}
+
+		defer rows.Close()
+
+		for rows.Next() {
+			var emaill string
+			rows.Scan(&emaill)
+
+			emailListe = append(emailListe, emaill)
+		}
+
+		for i := 0; i < len(emailListe); i++ {
+			if p.Email == emailListe[i] {
+				http.Error(w, "Email deja utiliser", http.StatusBadRequest)
+			}
+		}
 
 		if password != passwordV {
 			data.Errmsg = "Les mots de passe ne correspondent pas !"
@@ -676,7 +694,8 @@ func deletefavorisHandle(w http.ResponseWriter, r *http.Request) {
 func addCom(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
-
+		var last_name string
+		var first_name string
 		referer := r.Header.Get("Referer")
 		print(referer)
 		if referer == "" {
@@ -702,7 +721,13 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			println("erreur de conv")
 		}
-		_, err = db.Exec("INSERT INTO commentaire(users_id,data_string,meal_id) VALUES (?,?,?)", &sess.Userid, &dataCom, &id)
+
+		if err = db.QueryRow("SELECT first_name, last_name FROM users WHERE id = ?", &sess.Userid).Scan(&first_name, &last_name); err != nil {
+			http.Error(w, "select users name", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec("INSERT INTO commentaire(users_id,data_string,meal_id,first_name,last_name) VALUES (?,?,?,?,?)", &sess.Userid, &dataCom, &id, &first_name, &last_name)
 		if err != nil {
 			http.Error(w, "Erreur d'insert", http.StatusInternalServerError)
 			return
@@ -726,7 +751,7 @@ func GetCommentaireById(id int) []models.Commentaire {
 
 	for rows.Next() {
 		var c models.Commentaire
-		rows.Scan(&c.Id, &c.Users_id, &c.Data_string, &c.Meal_id)
+		rows.Scan(&c.Id, &c.Users_id, &c.Data_string, &c.Meal_id, &c.First_name, &c.Last_name)
 		Listallcommentaire = append(Listallcommentaire, c)
 	}
 	println(Listallcommentaire)
@@ -983,11 +1008,6 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	err = godotenv.Load(".env")
-	if err != nil {
-		log.Fatal("erreur .env", err)
-	}
-
 	if err = loadCategorieAPI(os.Getenv("API_CAT")); err != nil {
 		log.Printf("API cat warning: %v", err)
 	}
@@ -1003,17 +1023,14 @@ func main() {
 		log.Fatal("erreur template", err)
 	}
 
-	// ✅ Servir les fichiers statiques (CSS, JS, images, etc.)
 	fs := http.FileServer(http.Dir("../frontend"))
 	http.Handle("/CSS/", http.StripPrefix("/", fs))
 
-	// ✅ ROUTES SANS CHI (plus simple, fonctionne direct)
 	http.HandleFunc("/", acceuilHandle)
 	http.HandleFunc("/login", loginHandle)
 	http.HandleFunc("/register", registerhandle)
 	http.HandleFunc("/verify", verifyHandle)
 
-	// ✅ Routes protégées (session manuelle)
 	http.HandleFunc("/home", requireAuth(homeHandle))
 	http.HandleFunc("/categorie", requireAuth(categorieHandle))
 	http.HandleFunc("/meals", requireAuth(recetteHandle))

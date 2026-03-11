@@ -116,7 +116,10 @@
               <div style="margin-bottom: 2rem;">
                 {{range $.Listecommentaire}}
                   <div class="comment">
-                    <p class="comment-text">{{.Data_string}}</p>
+                    <div class="container__commentaire">
+                      <h2>{{.First_name}} {{.Last_name}}</h2>
+                      <p class="comment-text">{{.Data_string}}</p>
+                    </div>
                     {{if eq .Users_id $.User_id}}
                       <div class="comment-actions">
                         <form action="/deletecommentaire" method="post" style="display:inline;">
