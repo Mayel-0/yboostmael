@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,19 +109,13 @@ func connectDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("DATABASE_URL manquante")
 	}
 
-	// Force IPv4 + timeout pour Render (local IPv6 = problème connu)
-	if !strings.Contains(dsn, "sslmode") {
-		dsn += " sslmode=require"
-	}
-	dsn += " connect_timeout=30"
-
-	// ✅ UNIQUEMENT PGX
+	// ✅ Utilise la string EXACTE du dashboard (pas de modification)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("erreur ouverture DB: %w", err)
 	}
 
-	// Test connexion 30s (Supabase lent parfois)
+	// Test connexion avec timeout long
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
