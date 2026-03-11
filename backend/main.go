@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -15,9 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/gomail.v2"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	// import interne
 	"yboost/models"
@@ -25,7 +24,7 @@ import (
 
 var err error
 var tpl *template.Template
-var db *sql.DB
+var db *gorm.DB
 var sessions = map[string]models.Session{}
 
 var ApiCategorie []models.Food_categorie
@@ -103,29 +102,40 @@ func parseTemplates() (*template.Template, error) {
 	}
 	return tpl, nil
 }
-func connectDB() (*sql.DB, error) {
+
+func connectDB() error {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		return nil, fmt.Errorf("DATABASE_URL manquante")
+		return fmt.Errorf("DATABASE_URL manquante")
 	}
 
-	// ✅ Utilise la string EXACTE du dashboard (pas de modification)
-	db, err := sql.Open("pgx", dsn)
+	var err error
+	// Connexion via GORM
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("erreur ouverture DB: %w", err)
+		return fmt.Errorf("erreur ouverture GORM: %w", err)
 	}
 
-	// Test connexion avec timeout long
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err = db.PingContext(ctx); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("connexion DB échouée: %w", err)
+	// Récupération de l'objet SQL brut pour le Ping (optionnel mais recommandé)
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
 	}
 
-	log.Println("✅ DB Supabase connectée!")
-	return db, nil
+	if err := sqlDB.Ping(); err != nil {
+		return fmt.Errorf("ping échoué: %w", err)
+	}
+
+	log.Println("✅ DB Supabase connectée avec GORM!")
+
+	// 3. Migration (Crée tes tables automatiquement)
+	// Ajoute ici tous tes modèles (Users, Favoris, Commentaire...)
+	err = db.AutoMigrate(&models.Users{}, &models.Email_verification{}, &models.Favoris{}, &models.Commentaire{}, &models.Liste{})
+	if err != nil {
+		log.Printf("Erreur migration: %v", err)
+	}
+
+	return nil
 }
 
 func acceuilHandle(w http.ResponseWriter, r *http.Request) {
@@ -149,22 +159,15 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 		p.Email = r.FormValue("email")
 		password := r.FormValue("password")
 
-		rows, err := db.Query("SELECT pass_hash, id FROM users WHERE email = ?", &p.Email)
-		if err != nil {
-			fmt.Println("erreur de select db", err)
-			return
-		}
-		defer rows.Close()
-
-		if rows.Next() == false {
-			data.Errmsg = "Mots de passe ou email incorrect"
-			tpl.ExecuteTemplate(w, "login.html", data)
-			return
-		} else {
-			//var emaildb strin
-			if err := rows.Scan(&p.PasswordHash, &p.Id); err != nil {
-				log.Fatal(err)
+		result := db.Select("pass_hash, id").Where("email = ?", p.Email).First(&p)
+		if result.Error != nil {
+			if result.Error == gorm.ErrRecordNotFound {
+				data.Errmsg = "Mots de passe ou email incorrect"
+				tpl.ExecuteTemplate(w, "login.html", data)
+				return
 			}
+			fmt.Println("erreur de select db", result.Error)
+			return
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(p.PasswordHash), []byte(password)); err != nil {
@@ -188,8 +191,13 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_, err = db.Query("INSERT INTO email_verification (users_id, verify_token, verify_expires_at, is_verified) VALUES (?,?,?,0)", &p.Id, &Code, &expiresAt)
-		if err != nil {
+		emailVerif := models.Email_verification{
+			User_id:           p.Id,
+			Verify_token:      Code,
+			Verify_expires_at: expiresAt,
+			Is_verified:       0,
+		}
+		if err := db.Create(&emailVerif).Error; err != nil {
 			http.Error(w, "erreur insert db email", http.StatusInternalServerError)
 			return
 		}
@@ -203,7 +211,6 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func registerhandle(w http.ResponseWriter, r *http.Request) {
-	var emailListe []string
 	var p models.Users
 	data := models.Pagedata{}
 	switch r.Method {
@@ -225,24 +232,10 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		password := r.FormValue("password")
 		passwordV := r.FormValue("passwordV")
 
-		rows, err := db.Query("SELECT email FROM users")
-		if err != nil {
-			http.Error(w, "probleme de communications", http.StatusInternalServerError)
-		}
-
-		defer rows.Close()
-
-		for rows.Next() {
-			var emaill string
-			rows.Scan(&emaill)
-
-			emailListe = append(emailListe, emaill)
-		}
-
-		for i := 0; i < len(emailListe); i++ {
-			if p.Email == emailListe[i] {
-				http.Error(w, "Email deja utiliser", http.StatusBadRequest)
-			}
+		var existingUser models.Users
+		if err := db.Select("email").Where("email = ?", p.Email).First(&existingUser).Error; err == nil {
+			http.Error(w, "Email deja utiliser", http.StatusBadRequest)
+			return
 		}
 
 		if password != passwordV {
@@ -262,8 +255,14 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_, err = db.Exec("INSERT INTO users(email, pass_hash, first_name, last_name, created_at) VALUES(?,?,?,?,NOW())", &p.Email, &hashed, &p.FirstName, &p.LastName)
-		if err != nil {
+		newUser := models.Users{
+			Email:        p.Email,
+			PasswordHash: string(hashed),
+			FirstName:    p.FirstName,
+			LastName:     p.LastName,
+			CreatedAt:    time.Now(),
+		}
+		if err := db.Create(&newUser).Error; err != nil {
 			http.Error(w, "ERREUR de Insert db", http.StatusInternalServerError)
 			return
 		}
@@ -308,8 +307,7 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		code := r.FormValue("code")
 
-		if err = db.QueryRow("SELECT id, verify_token , verify_expires_at, is_verified FROM email_verification WHERE users_id = ? ORDER BY id DESC LIMIT 1",
-			&p.Id).Scan(&m.Id, &m.Verify_token, &m.Verify_expires_at, &m.Is_verified); err != nil {
+		if err = db.Where("users_id = ?", p.Id).Order("id DESC").First(&m).Error; err != nil {
 			http.Redirect(w, r, "/verify?User_id="+idstr+"&error=code", http.StatusSeeOther)
 			return
 		}
@@ -321,8 +319,7 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 
 		fmt.Println("code bon gg !")
 
-		_, err = db.Query("UPDATE email_verification SET is_verified = 1 WHERE users_id = ? AND verify_token = ? AND id = ? ", &m.User_id, &m.Verify_token, &m.Id)
-		if err != nil {
+		if err = db.Model(&models.Email_verification{}).Where("users_id = ? AND verify_token = ? AND id = ?", m.User_id, m.Verify_token, m.Id).Update("is_verified", 1).Error; err != nil {
 			http.Error(w, "erreur de update code email", http.StatusInternalServerError)
 			return
 		}
@@ -594,15 +591,21 @@ func addfavorisHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		users_id := strconv.Itoa(sess.Userid)
-
 		id := r.FormValue("id")
 		name := r.FormValue("name")
 		categorie := r.FormValue("categorie")
 		origine := r.FormValue("origine")
 		thrumb := r.FormValue("Thumb")
-		_, err = db.Exec("INSERT INTO favoris (id,users_id,name,categorie,origine,thrumb) VALUES (?,?,?,?,?,?)", &id, &users_id, &name, &categorie, &origine, &thrumb)
-		if err != nil {
+
+		favoris := models.Favoris{
+			Id:        id,
+			User_id:   sess.Userid,
+			Name:      name,
+			Categorie: categorie,
+			Origine:   origine,
+			Thumb:     thrumb,
+		}
+		if err = db.Create(&favoris).Error; err != nil {
 			http.Error(w, "erreur d'insert", http.StatusInternalServerError)
 			return
 		}
@@ -650,19 +653,8 @@ func favorisHandle(w http.ResponseWriter, r *http.Request) {
 
 func getallfavoris(User_id int) []models.Favoris {
 	var liste []models.Favoris
-	rows, err := db.Query("SELECT * FROM favoris WHERE users_id = ?", &User_id)
-	if err != nil {
-		println("erreur select all favoris n1")
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var f models.Favoris
-		if err = rows.Scan(&f.Id, &f.User_id, &f.Name, &f.Categorie, &f.Origine, &f.Thumb); err != nil {
-			println("erreur select all favoris n2")
-		}
-		liste = append(liste, f)
+	if err := db.Where("users_id = ?", User_id).Find(&liste).Error; err != nil {
+		log.Printf("erreur select all favoris: %v", err)
 	}
 	return liste
 }
@@ -684,14 +676,9 @@ func deletefavorisHandle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		name := r.FormValue("name")
-		idstr := r.FormValue("id")
-		id, err := strconv.Atoi(idstr)
-		if err != nil {
-			http.Error(w, "erreur de convertion", http.StatusInternalServerError)
-		}
+		id := r.FormValue("id")
 
-		_, err = db.Exec("DELETE FROM favoris WHERE users_id = ? AND id = ? AND name = ?", &sess.Userid, &id, &name)
-		if err != nil {
+		if err = db.Where("users_id = ? AND id = ? AND name = ?", sess.Userid, id, name).Delete(&models.Favoris{}).Error; err != nil {
 			http.Error(w, "erreur de delete", http.StatusInternalServerError)
 			return
 		}
@@ -734,13 +721,22 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 			println("erreur de conv")
 		}
 
-		if err = db.QueryRow("SELECT first_name, last_name FROM users WHERE id = ?", &sess.Userid).Scan(&first_name, &last_name); err != nil {
+		var user models.Users
+		if err = db.Select("first_name, last_name").Where("id = ?", sess.Userid).First(&user).Error; err != nil {
 			http.Error(w, "select users name", http.StatusInternalServerError)
 			return
 		}
+		first_name = user.FirstName
+		last_name = user.LastName
 
-		_, err = db.Exec("INSERT INTO commentaire(users_id,data_string,meal_id,first_name,last_name) VALUES (?,?,?,?,?)", &sess.Userid, &dataCom, &id, &first_name, &last_name)
-		if err != nil {
+		commentaire := models.Commentaire{
+			Users_id:    sess.Userid,
+			Data_string: dataCom,
+			Meal_id:     id,
+			First_name:  first_name,
+			Last_name:   last_name,
+		}
+		if err = db.Create(&commentaire).Error; err != nil {
 			http.Error(w, "Erreur d'insert", http.StatusInternalServerError)
 			return
 		}
@@ -754,19 +750,9 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 
 func GetCommentaireById(id int) []models.Commentaire {
 	var Listallcommentaire []models.Commentaire
-	rows, err := db.Query("SELECT * FROM commentaire WHERE meal_id = ?", id)
-	if err != nil {
-		println("erreur select")
+	if err := db.Where("meal_id = ?", id).Find(&Listallcommentaire).Error; err != nil {
+		log.Printf("erreur select commentaires: %v", err)
 	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var c models.Commentaire
-		rows.Scan(&c.Id, &c.Users_id, &c.Data_string, &c.Meal_id, &c.First_name, &c.Last_name)
-		Listallcommentaire = append(Listallcommentaire, c)
-	}
-	println(Listallcommentaire)
 	return Listallcommentaire
 }
 
@@ -798,8 +784,7 @@ func deleteCom(w http.ResponseWriter, r *http.Request) {
 			referer = "/home"
 		}
 
-		_, err = db.Exec("DELETE FROM commentaire WHERE users_id = ? AND id = ?", &sess.Userid, &id)
-		if err != nil {
+		if err = db.Where("users_id = ? AND id = ?", sess.Userid, id).Delete(&models.Commentaire{}).Error; err != nil {
 			http.Error(w, "Erreur delete", http.StatusInternalServerError)
 			return
 		}
@@ -827,21 +812,10 @@ func listeHandle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var Liste []models.Liste
-		rows, err := db.Query("SELECT * FROM liste WHERE id_users = ?", sess.Userid) // Sans &
-		if err != nil {
+		if err := db.Where("id_users = ?", sess.Userid).Find(&Liste).Error; err != nil {
 			log.Printf("DB erreur: %v", err)
 			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
 			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var l models.Liste
-			if err := rows.Scan(&l.Id, &l.Id_users, &l.Aliment, &l.Nombre, &l.Unite, &l.Prix, &l.Is_finish); err != nil {
-				log.Printf("Scan erreur: %v", err)
-				continue
-			}
-			Liste = append(Liste, l)
 		}
 
 		prixTotal, err := TotalPrix(sess.Userid)
@@ -858,24 +832,11 @@ func listeHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func TotalPrix(id_users int) (float64, error) {
-	total := 0.00
-	rows, err := db.Query("SELECT prix FROM liste WHERE id_users = ?", &id_users)
-	if err != nil {
-		return total, err
+	var total float64
+	if err := db.Model(&models.Liste{}).Where("id_users = ?", id_users).Select("COALESCE(SUM(prix), 0)").Scan(&total).Error; err != nil {
+		return 0, err
 	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var n float64
-		if err = rows.Scan(&n); err != nil {
-			return total, err
-		}
-
-		total += n
-	}
-
-	return total, err
+	return total, nil
 }
 
 func listeUpdate(w http.ResponseWriter, r *http.Request) {
@@ -916,9 +877,7 @@ func listeUpdate(w http.ResponseWriter, r *http.Request) {
 	isFinish := r.FormValue("is_finish") == "1"
 
 	// UPDATE DB (sécurisé avec id_users)
-	_, err = db.Exec("UPDATE liste SET is_finish = ? WHERE id = ? AND id_users = ?",
-		isFinish, id, sess.Userid)
-	if err != nil {
+	if err = db.Model(&models.Liste{}).Where("id = ? AND id_users = ?", id, sess.Userid).Update("is_finish", isFinish).Error; err != nil {
 		log.Printf("Update erreur %d: %v", id, err)
 	}
 
@@ -960,14 +919,14 @@ func ListeAdd(w http.ResponseWriter, r *http.Request) {
 		}
 
 		l := models.Liste{
-			Aliment: r.FormValue("aliment"),
-			Nombre:  nombre,
-			Prix:    prix,
-			Unite:   r.FormValue("unite"),
+			Id_users: sess.Userid,
+			Aliment:  r.FormValue("aliment"),
+			Nombre:   nombre,
+			Prix:     prix,
+			Unite:    r.FormValue("unite"),
 		}
 
-		_, err = db.Exec("INSERT INTO liste (id_users, aliment, nombre, unite, prix) VALUES (?,?,?,?,?)", &sess.Userid, &l.Aliment, &l.Nombre, &l.Unite, &l.Prix)
-		if err != nil {
+		if err = db.Create(&l).Error; err != nil {
 			http.Error(w, "Erreur de insert", http.StatusInternalServerError)
 			return
 		}
@@ -1005,11 +964,12 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(idstr)
 		if err != nil {
 			http.Error(w, "erreur de conv", http.StatusInternalServerError)
+			return
 		}
 
-		_, err = db.Exec("DELETE FROM liste WHERE id_users = ? AND id = ?", &sess.Userid, &id)
-		if err != nil {
+		if err = db.Where("id_users = ? AND id = ?", sess.Userid, id).Delete(&models.Liste{}).Error; err != nil {
 			http.Error(w, "erreur de delete", http.StatusInternalServerError)
+			return
 		}
 
 		http.Redirect(w, r, referer, http.StatusSeeOther)
@@ -1024,11 +984,9 @@ func main() {
 		log.Printf("API cat warning: %v", err)
 	}
 
-	db, err = connectDB()
-	if err != nil {
-		log.Fatal("erreur db connexion", err)
+	if err = connectDB(); err != nil {
+		log.Fatal("erreur db connexion: ", err)
 	}
-	defer db.Close()
 
 	tpl, err = parseTemplates()
 	if err != nil {
@@ -1057,8 +1015,14 @@ func main() {
 	http.HandleFunc("/liste/update", listeUpdate) // ✅ CHECKBOX UPDATE !
 	http.HandleFunc("/liste/delete", listeDelete)
 
-	log.Println("🚀 Serveur sur http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Récupérer le port via Render, sinon 8080 pour le local
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("🚀 Serveur lancé sur le port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 // ✅ MIDDLEWARE SIMPLE (fonctionne sans Chi)

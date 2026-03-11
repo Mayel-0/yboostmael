@@ -6,12 +6,16 @@ import (
 )
 
 type Users struct {
-	Id           int       `db:"id"`
-	Email        string    `db:"email"`
-	PasswordHash string    `db:"pass_hash"`
-	FirstName    string    `db:"first_name"`
-	LastName     string    `db:"last_name"`
-	CreatedAt    time.Time `db:"created_at"`
+	Id           int       `gorm:"primaryKey;column:id"`
+	Email        string    `gorm:"unique;column:email"`
+	PasswordHash string    `gorm:"column:pass_hash"`
+	FirstName    string    `gorm:"column:first_name"`
+	LastName     string    `gorm:"column:last_name"`
+	CreatedAt    time.Time `gorm:"column:created_at"`
+}
+
+func (Users) TableName() string {
+	return "users"
 }
 
 type Pagedata struct {
@@ -28,29 +32,41 @@ type Pagedata struct {
 }
 
 type Commentaire struct {
-	Id          int    `db:"id"`
-	Users_id    int    `db:"users_id"`
-	Data_string string `db:"data_string"`
-	Meal_id     int    `db:"meal_id"`
-	First_name  string `db:"first_name"`
-	Last_name   string `db:"last_name"`
+	Id          int    `gorm:"primaryKey;column:id"`
+	Users_id    int    `gorm:"column:users_id"`
+	Data_string string `gorm:"column:data_string"`
+	Meal_id     int    `gorm:"column:meal_id"`
+	First_name  string `gorm:"column:first_name"`
+	Last_name   string `gorm:"column:last_name"`
+}
+
+func (Commentaire) TableName() string {
+	return "commentaire"
 }
 
 type Favoris struct {
-	Id        int    `db:"id"`
-	User_id   int    `db:"users_id"`
-	Name      string `db:"name"`
-	Categorie string `db:"categorie"`
-	Origine   string `db:"origine"`
-	Thumb     string `db:"thrumb"`
+	Id        string `gorm:"primaryKey;column:id"`
+	User_id   int    `gorm:"column:users_id"`
+	Name      string `gorm:"column:name"`
+	Categorie string `gorm:"column:categorie"`
+	Origine   string `gorm:"column:origine"`
+	Thumb     string `gorm:"column:thrumb"`
+}
+
+func (Favoris) TableName() string {
+	return "favoris"
 }
 
 type Email_verification struct {
-	Id                int       `db:"id"`
-	User_id           int       `db:"users_id"`
-	Verify_token      string    `db:"verify_token"`
-	Verify_expires_at time.Time `db:"verify_expires_at"`
-	Is_verified       int       `db:"is_verified"`
+	Id                int       `gorm:"primaryKey;column:id"`
+	User_id           int       `gorm:"column:users_id"`
+	Verify_token      string    `gorm:"column:verify_token"`
+	Verify_expires_at time.Time `gorm:"column:verify_expires_at"`
+	Is_verified       int       `gorm:"column:is_verified"`
+}
+
+func (Email_verification) TableName() string {
+	return "email_verification"
 }
 
 type Session struct {
@@ -142,13 +158,17 @@ type Recette struct {
 }
 
 type Liste struct {
-	Id        int     `db:"id"`
-	Id_users  int     `db:"id_users"`
-	Aliment   string  `db:"aliment"`
-	Nombre    float64 `db:"nombre"`
-	Unite     string  `db:"unite"`
-	Prix      float64 `db:"prix"`
-	Is_finish bool    `db:"is_finish"`
+	Id        int     `gorm:"primaryKey;column:id"`
+	Id_users  int     `gorm:"column:id_users"`
+	Aliment   string  `gorm:"column:aliment"`
+	Nombre    float64 `gorm:"column:nombre"`
+	Unite     string  `gorm:"column:unite"`
+	Prix      float64 `gorm:"column:prix"`
+	Is_finish bool    `gorm:"column:is_finish"`
+}
+
+func (Liste) TableName() string {
+	return "liste"
 }
 
 func (r Recette) YoutubeEmbed() string {
