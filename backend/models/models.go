@@ -62,7 +62,7 @@ type Email_verification struct {
 	User_id           int       `gorm:"column:users_id"`
 	Verify_token      string    `gorm:"column:verify_token"`
 	Verify_expires_at time.Time `gorm:"column:verify_expires_at"`
-	Is_verified       int       `gorm:"column:is_verified"`
+	Is_verified       bool      `gorm:"column:is_verified"`
 }
 
 func (Email_verification) TableName() string {

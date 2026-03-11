@@ -198,7 +198,7 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			User_id:           p.Id,
 			Verify_token:      Code,
 			Verify_expires_at: expiresAt,
-			Is_verified:       0,
+			Is_verified:       false,
 		}
 		if err := db.Create(&emailVerif).Error; err != nil {
 			http.Error(w, "erreur insert db email", http.StatusInternalServerError)
@@ -315,14 +315,14 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if m.Verify_token != code || m.Is_verified != 0 || time.Now().After(m.Verify_expires_at) {
+		if m.Verify_token != code || m.Is_verified || time.Now().After(m.Verify_expires_at) {
 			http.Redirect(w, r, "/verify?User_id="+idstr+"&error=code", http.StatusSeeOther)
 			return
 		}
 
 		fmt.Println("code bon gg !")
 
-		if err = db.Model(&models.Email_verification{}).Where("users_id = ? AND verify_token = ? AND id = ?", m.User_id, m.Verify_token, m.Id).Update("is_verified", 1).Error; err != nil {
+		if err = db.Model(&models.Email_verification{}).Where("users_id = ? AND verify_token = ? AND id = ?", m.User_id, m.Verify_token, m.Id).Update("is_verified", true).Error; err != nil {
 			http.Error(w, "erreur de update code email", http.StatusInternalServerError)
 			return
 		}
