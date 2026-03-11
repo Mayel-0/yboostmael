@@ -110,8 +110,11 @@ func connectDB() error {
 	}
 
 	var err error
-	// Connexion via GORM
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// Connexion via GORM avec configuration explicite pour Supabase Pooler
+	db, err = gorm.Open(postgres.New(postgres.Config{
+		DSN:                  dsn,
+		PreferSimpleProtocol: true, // Aide énormément avec le pooler de Supabase
+	}), &gorm.Config{})
 	if err != nil {
 		return fmt.Errorf("erreur ouverture GORM: %w", err)
 	}
