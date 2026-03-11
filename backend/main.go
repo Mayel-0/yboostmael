@@ -12,9 +12,9 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
@@ -110,14 +110,20 @@ func connectDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("DATABASE_URL manquante")
 	}
 
-	// ✅ Driver PostgreSQL (pgx recommandé)
+	// Force IPv4 + timeout pour Render (local IPv6 = problème connu)
+	if !strings.Contains(dsn, "sslmode") {
+		dsn += " sslmode=require"
+	}
+	dsn += " connect_timeout=30"
+
+	// ✅ UNIQUEMENT PGX
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("erreur ouverture DB: %w", err)
 	}
 
-	// Test connexion avec timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Test connexion 30s (Supabase lent parfois)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err = db.PingContext(ctx); err != nil {
