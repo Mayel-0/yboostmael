@@ -57,14 +57,22 @@ func SendEmail(to, subject, body string) error {
 
 	// Dialer SMTP.
 	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
-	if smtpPort == 465 {
-		d.SSL = true
-	}
 
 	// Envoi.
-	if err := d.DialAndSend(m); err != nil {
-		log.Printf("❌ ERREUR SMTP CRITIQUE: %v", err)
-		return fmt.Errorf("send email: %w", err)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.DialAndSend(m)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			log.Printf("❌ ERREUR SMTP CRITIQUE: %v", err)
+			return fmt.Errorf("send email: %w", err)
+		}
+	case <-time.After(10 * time.Second):
+		log.Printf("❌ ERREUR SMTP CRITIQUE: timeout après 10s")
+		return fmt.Errorf("send email timeout after 10s")
 	}
 
 	log.Printf("✅ Email de vérification envoyé (port=%d, ssl=%t)", smtpPort, d.SSL)
@@ -1028,6 +1036,13 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	smtpPort := os.Getenv("SMTP_PORT")
+	if smtpPort == "" {
+		log.Println("ℹ️ SMTP_PORT non défini")
+	} else {
+		log.Printf("ℹ️ SMTP configuré sur le port %s", smtpPort)
+	}
+
 	if err = loadCategorieAPI(os.Getenv("API_CAT")); err != nil {
 		log.Printf("API cat warning: %v", err)
 	}
