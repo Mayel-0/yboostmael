@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -257,6 +258,11 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			Verify_expires_at: expiresAt,
 			Is_verified:       false,
 		}
+		if err := db.Where("users_id = ? AND is_verified = ?", p.Id, false).Delete(&models.Email_verification{}).Error; err != nil {
+			log.Printf("erreur purge email_verification: %v", err)
+			http.Error(w, "Erreur lors de la préparation du code", http.StatusInternalServerError)
+			return
+		}
 		if err := db.Create(&emailVerif).Error; err != nil {
 			log.Printf("erreur insert email_verification: %v", err)
 			http.Error(w, "Erreur lors de l'enregistrement du code", http.StatusInternalServerError)
@@ -294,8 +300,15 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		passwordV := r.FormValue("passwordV")
 
 		var existingUser models.Users
-		if err := db.Select("email").Where("email = ?", p.Email).First(&existingUser).Error; err == nil {
-			http.Error(w, "Email deja utiliser", http.StatusBadRequest)
+		lookupErr := db.Select("email").Where("email = ?", p.Email).First(&existingUser).Error
+		if lookupErr == nil {
+			data.Errmsg = "Email déjà utilisé"
+			tpl.ExecuteTemplate(w, "register.html", data)
+			return
+		}
+		if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			log.Printf("erreur lookup email register: %v", lookupErr)
+			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
 			return
 		}
 
