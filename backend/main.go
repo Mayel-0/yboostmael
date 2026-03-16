@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
-	"gopkg.in/gomail.v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -32,50 +33,50 @@ var ApiFoodlist []models.Food_affichage
 var ApiRecette []models.Recette
 
 func SendEmail(to, subject, body string) error {
-	smtpHost := os.Getenv("SMTP_HOST")
-	smtpPortStr := os.Getenv("SMTP_PORT")
-	smtpUser := os.Getenv("SMTP_USER")
-	smtpPass := os.Getenv("SMTP_PASS")
-	from := os.Getenv("SMTP_FROM")
-
-	if smtpHost == "" || smtpPortStr == "" || smtpUser == "" || smtpPass == "" || from == "" {
-		return fmt.Errorf("configuration SMTP manquante (vérifie SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM)")
+	apiKey := os.Getenv("RESEND_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("configuration RESEND_API_KEY manquante")
 	}
 
-	var smtpPort int
-	_, err := fmt.Sscanf(smtpPortStr, "%d", &smtpPort)
+	from := os.Getenv("RESEND_FROM")
+	if from == "" {
+		from = "onboarding@resend.dev"
+	}
+
+	payload := map[string]interface{}{
+		"from":    "YBoost <" + from + ">",
+		"to":      []string{to},
+		"subject": subject,
+		"text":    body,
+	}
+
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("SMTP_PORT invalide: %w", err)
+		return fmt.Errorf("erreur json resend: %w", err)
 	}
 
-	// Construction du message.
-	m := gomail.NewMessage()
-	m.SetHeader("From", from)
-	m.SetHeader("To", to)
-	m.SetHeader("Subject", subject)
-	m.SetBody("text/plain", body)
+	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("erreur requête resend: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
 
-	// Dialer SMTP.
-	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("❌ ERREUR API RESEND: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
 
-	// Envoi.
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- d.DialAndSend(m)
-	}()
-
-	select {
-	case err := <-errCh:
-		if err != nil {
-			log.Printf("❌ ERREUR SMTP CRITIQUE: %v", err)
-			return fmt.Errorf("send email: %w", err)
-		}
-	case <-time.After(10 * time.Second):
-		log.Printf("❌ ERREUR SMTP CRITIQUE: timeout après 10s")
-		return fmt.Errorf("send email timeout after 10s")
+	if resp.StatusCode > 299 {
+		bodyResp, _ := io.ReadAll(resp.Body)
+		log.Printf("❌ ERREUR API RESEND: status=%d", resp.StatusCode)
+		return fmt.Errorf("erreur API Resend: status %d, body %s", resp.StatusCode, string(bodyResp))
 	}
 
-	log.Printf("✅ Email de vérification envoyé (port=%d, ssl=%t)", smtpPort, d.SSL)
+	log.Println("✅ Email envoyé via API avec succès")
 
 	return nil
 }
@@ -1036,11 +1037,10 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	smtpPort := os.Getenv("SMTP_PORT")
-	if smtpPort == "" {
-		log.Println("ℹ️ SMTP_PORT non défini")
+	if os.Getenv("RESEND_API_KEY") == "" {
+		log.Println("ℹ️ RESEND_API_KEY non défini")
 	} else {
-		log.Printf("ℹ️ SMTP configuré sur le port %s", smtpPort)
+		log.Println("ℹ️ Resend configuré")
 	}
 
 	if err = loadCategorieAPI(os.Getenv("API_CAT")); err != nil {
