@@ -57,11 +57,17 @@ func SendEmail(to, subject, body string) error {
 
 	// Dialer SMTP.
 	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
+	if smtpPort == 465 {
+		d.SSL = true
+	}
 
 	// Envoi.
 	if err := d.DialAndSend(m); err != nil {
+		log.Printf("❌ ERREUR SMTP CRITIQUE: %v", err)
 		return fmt.Errorf("send email: %w", err)
 	}
+
+	log.Printf("✅ Email de vérification envoyé (port=%d, ssl=%t)", smtpPort, d.SSL)
 
 	return nil
 }
@@ -207,7 +213,8 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 				tpl.ExecuteTemplate(w, "login.html", data)
 				return
 			}
-			fmt.Println("erreur de select db", result.Error)
+			log.Printf("erreur select utilisateur login: %v", result.Error)
+			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
 			return
 		}
 
@@ -225,13 +232,12 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 
 		expiresAt := time.Now().Add(5 * time.Minute)
 
-		println("voici le code : ", Code)
 		err = SendVerificationEmail(p.Email, Code)
 		if err != nil {
-			log.Printf("erreur envoi email de vérification pour %s: %v", p.Email, err)
+			log.Printf("erreur envoi email de vérification: %v", err)
 			data.Errmsg = "Impossible d'envoyer le code de vérification. Réessaie plus tard."
 			if tplErr := tpl.ExecuteTemplate(w, "login.html", data); tplErr != nil {
-				http.Error(w, "Erreur lors de l'envoi de l'email : "+err.Error(), http.StatusInternalServerError)
+				http.Error(w, "Erreur lors de l'envoi de l'email", http.StatusInternalServerError)
 			}
 			return
 		}
@@ -243,8 +249,8 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			Is_verified:       false,
 		}
 		if err := db.Create(&emailVerif).Error; err != nil {
-			log.Printf("erreur insert email_verification pour user_id=%d: %v", p.Id, err)
-			http.Error(w, "Erreur lors de l'enregistrement du code : "+err.Error(), http.StatusInternalServerError)
+			log.Printf("erreur insert email_verification: %v", err)
+			http.Error(w, "Erreur lors de l'enregistrement du code", http.StatusInternalServerError)
 			return
 		}
 
@@ -363,7 +369,7 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		fmt.Println("code bon gg !")
+		log.Println("Code de vérification validé")
 
 		if err = db.Model(&models.Email_verification{}).Where("users_id = ? AND verify_token = ? AND id = ?", m.User_id, m.Verify_token, m.Id).Update("is_verified", true).Error; err != nil {
 			http.Error(w, "erreur de update code email", http.StatusInternalServerError)
@@ -476,10 +482,10 @@ func ApiSearch(url string) error {
 
 	var apiResp models.ApiRecette
 	if err = json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		fmt.Println("decode error:", err)
+		log.Printf("decode error: %v", err)
 		return err
 	}
-	fmt.Println("len search =", len(apiResp.Recette))
+	log.Printf("search results count: %d", len(apiResp.Recette))
 	ApiRecette = apiResp.Recette
 	return nil
 }
@@ -487,10 +493,8 @@ func ApiSearch(url string) error {
 func searchHandle(w http.ResponseWriter, r *http.Request) {
 	data := models.Pagedata{}
 	namestr := r.FormValue("name")
-	print(namestr)
 	encoded := url.QueryEscape(namestr)
 	url := os.Getenv("API_SEARCH") + encoded
-	print(url)
 
 	err = ApiSearch(url)
 	if err != nil {
@@ -583,7 +587,6 @@ func ApiRecettefunc(url string) error {
 	}
 
 	defer resp.Body.Close()
-	fmt.Println(resp.Body)
 
 	var apiResp models.ApiRecette
 	if err = json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
@@ -742,7 +745,6 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 		var last_name string
 		var first_name string
 		referer := r.Header.Get("Referer")
-		print(referer)
 		if referer == "" {
 			referer = "/" // Fallback si pas de referer
 		}
@@ -764,7 +766,7 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 		idstr := r.FormValue("id")
 		id, err := strconv.Atoi(idstr)
 		if err != nil {
-			println("erreur de conv")
+			log.Printf("erreur conversion id commentaire: %v", err)
 		}
 
 		var user models.Users
