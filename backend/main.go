@@ -131,6 +131,10 @@ func connectDB() error {
 
 	log.Println("✅ DB Supabase connectée avec GORM!")
 
+	if err := ensureEmailVerificationSchema(); err != nil {
+		return fmt.Errorf("préparation schema email_verification: %w", err)
+	}
+
 	// 3. Migration (Crée tes tables automatiquement)
 	// Ajoute ici tous tes modèles (Users, Favoris, Commentaire...)
 	err = db.AutoMigrate(&models.Users{}, &models.Email_verification{}, &models.Favoris{}, &models.Commentaire{}, &models.Liste{})
@@ -139,6 +143,40 @@ func connectDB() error {
 	}
 
 	return nil
+}
+
+func ensureEmailVerificationSchema() error {
+	if !db.Migrator().HasTable(&models.Email_verification{}) {
+		return nil
+	}
+
+	var dataType string
+	if err := db.Raw(`
+		SELECT data_type
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = ?
+		  AND column_name = ?
+	`, "email_verification", "is_verified").Scan(&dataType).Error; err != nil {
+		return err
+	}
+
+	if dataType == "" || dataType == "boolean" {
+		return nil
+	}
+
+	log.Printf("Correction du type email_verification.is_verified (type actuel: %s)", dataType)
+	return db.Exec(`
+		ALTER TABLE email_verification
+		ALTER COLUMN is_verified DROP DEFAULT,
+		ALTER COLUMN is_verified TYPE boolean
+		USING CASE
+			WHEN is_verified IS NULL THEN false
+			WHEN is_verified::text IN ('1', 't', 'true', 'TRUE') THEN true
+			ELSE false
+		END,
+		ALTER COLUMN is_verified SET DEFAULT false
+	`).Error
 }
 
 func acceuilHandle(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +228,11 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 		println("voici le code : ", Code)
 		err = SendVerificationEmail(p.Email, Code)
 		if err != nil {
-			fmt.Println("erreur dans l'envoie du mail")
+			log.Printf("erreur envoi email de vérification pour %s: %v", p.Email, err)
+			data.Errmsg = "Impossible d'envoyer le code de vérification. Réessaie plus tard."
+			if tplErr := tpl.ExecuteTemplate(w, "login.html", data); tplErr != nil {
+				http.Error(w, "Erreur lors de l'envoi de l'email : "+err.Error(), http.StatusInternalServerError)
+			}
 			return
 		}
 
@@ -201,7 +243,8 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			Is_verified:       false,
 		}
 		if err := db.Create(&emailVerif).Error; err != nil {
-			http.Error(w, "erreur insert db email", http.StatusInternalServerError)
+			log.Printf("erreur insert email_verification pour user_id=%d: %v", p.Id, err)
+			http.Error(w, "Erreur lors de l'enregistrement du code : "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
