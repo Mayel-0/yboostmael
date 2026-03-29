@@ -212,7 +212,7 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 		return err
 	}
 
-	payload := map[string]interface{}{
+	signUpBody := map[string]interface{}{
 		"email":    email,
 		"password": password,
 		"options": map[string]interface{}{
@@ -222,7 +222,7 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 			},
 		},
 	}
-	jsonData, err := json.Marshal(payload)
+	jsonData, err := json.Marshal(signUpBody)
 	if err != nil {
 		return err
 	}
