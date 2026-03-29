@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -13,10 +12,11 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -45,6 +45,18 @@ type ErrorPageData struct {
 	Debug      string
 }
 
+type SupabaseAuthResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+}
+
+type SupabaseErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	Message          string `json:"message"`
+	Msg              string `json:"msg"`
+}
+
 func renderErrorPage(w http.ResponseWriter, r *http.Request, statusCode int, userMessage, debugDetail string) {
 	errorID := uuid.NewString()
 	showDebug := os.Getenv("SHOW_ERROR_DETAILS") == "1"
@@ -70,6 +82,179 @@ func renderErrorPage(w http.ResponseWriter, r *http.Request, statusCode int, use
 		http.Error(w, userMessage+" (incident: "+errorID+")", statusCode)
 		return
 	}
+}
+
+func getSupabaseConfig() (projectURL, anonKey, jwtSecret string, cfgErr error) {
+	projectURL = os.Getenv("SUPABASE_URL")
+	anonKey = os.Getenv("SUPABASE_ANON_KEY")
+	jwtSecret = os.Getenv("SUPABASE_JWT_SECRET")
+
+	if projectURL == "" || anonKey == "" || jwtSecret == "" {
+		return "", "", "", fmt.Errorf("variables Supabase manquantes (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET)")
+	}
+
+	projectURL = strings.TrimRight(projectURL, "/")
+	return projectURL, anonKey, jwtSecret, nil
+}
+
+func parseSupabaseErrorBody(body []byte) string {
+	var apiErr SupabaseErrorResponse
+	if err := json.Unmarshal(body, &apiErr); err == nil {
+		if apiErr.ErrorDescription != "" {
+			return apiErr.ErrorDescription
+		}
+		if apiErr.Message != "" {
+			return apiErr.Message
+		}
+		if apiErr.Msg != "" {
+			return apiErr.Msg
+		}
+		if apiErr.Error != "" {
+			return apiErr.Error
+		}
+	}
+
+	if len(body) == 0 {
+		return "réponse vide"
+	}
+	return string(body)
+}
+
+func supabaseAuthenticate(email, password string) (SupabaseAuthResponse, error) {
+	projectURL, anonKey, _, err := getSupabaseConfig()
+	if err != nil {
+		return SupabaseAuthResponse{}, err
+	}
+
+	payload := map[string]string{
+		"email":    email,
+		"password": password,
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return SupabaseAuthResponse{}, err
+	}
+
+	endpoint := projectURL + "/auth/v1/token?grant_type=password"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return SupabaseAuthResponse{}, err
+	}
+	req.Header.Set("apikey", anonKey)
+	req.Header.Set("Authorization", "Bearer "+anonKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return SupabaseAuthResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	bodyResp, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return SupabaseAuthResponse{}, fmt.Errorf("supabase auth status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
+	}
+
+	var authResp SupabaseAuthResponse
+	if err := json.Unmarshal(bodyResp, &authResp); err != nil {
+		return SupabaseAuthResponse{}, err
+	}
+	if authResp.AccessToken == "" {
+		return SupabaseAuthResponse{}, fmt.Errorf("supabase auth: access_token absent")
+	}
+
+	return authResp, nil
+}
+
+func supabaseSignUp(email, password, firstName, lastName string) error {
+	projectURL, anonKey, _, err := getSupabaseConfig()
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]interface{}{
+		"email":    email,
+		"password": password,
+		"options": map[string]interface{}{
+			"data": map[string]string{
+				"first_name": firstName,
+				"last_name":  lastName,
+			},
+		},
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	endpoint := projectURL + "/auth/v1/signup"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("apikey", anonKey)
+	req.Header.Set("Authorization", "Bearer "+anonKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	bodyResp, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("supabase signup status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
+	}
+
+	return nil
+}
+
+func hydrateSessionFromJWT(tokenString string) (models.Session, error) {
+	if sess, exists := sessions[tokenString]; exists && time.Now().Before(sess.Expiry) {
+		return sess, nil
+	}
+
+	_, _, jwtSecret, err := getSupabaseConfig()
+	if err != nil {
+		return models.Session{}, err
+	}
+
+	parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("algorithme JWT inattendu: %s", token.Method.Alg())
+		}
+		return []byte(jwtSecret), nil
+	})
+	if err != nil || !parsedToken.Valid {
+		return models.Session{}, fmt.Errorf("jwt invalide")
+	}
+
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return models.Session{}, fmt.Errorf("claims JWT invalides")
+	}
+
+	userID, _ := claims["sub"].(string)
+	if userID == "" {
+		return models.Session{}, fmt.Errorf("claim sub manquante dans JWT")
+	}
+
+	expFloat, ok := claims["exp"].(float64)
+	if !ok {
+		return models.Session{}, fmt.Errorf("claim exp manquante dans JWT")
+	}
+
+	expiry := time.Unix(int64(expFloat), 0)
+	if time.Now().After(expiry) {
+		return models.Session{}, fmt.Errorf("jwt expiré")
+	}
+
+	sess := models.Session{Userid: userID, Expiry: expiry}
+	sessions[tokenString] = sess
+	return sess, nil
 }
 
 func SendEmail(to, subject, body string) error {
@@ -187,13 +372,9 @@ func connectDB() error {
 
 	log.Println("✅ DB Supabase connectée avec GORM!")
 
-	if err := ensureEmailVerificationSchema(); err != nil {
-		return fmt.Errorf("préparation schema email_verification: %w", err)
-	}
-
 	// 3. Migration (Crée tes tables automatiquement)
 	// Ajoute ici tous tes modèles (Users, Favoris, Commentaire...)
-	err = db.AutoMigrate(&models.Users{}, &models.Email_verification{}, &models.Favoris{}, &models.Commentaire{}, &models.Liste{})
+	err = db.AutoMigrate(&models.Users{}, &models.Favoris{}, &models.Commentaire{}, &models.Liste{})
 	if err != nil {
 		log.Printf("Erreur migration: %v", err)
 	}
@@ -248,7 +429,6 @@ func acceuilHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func loginHandle(w http.ResponseWriter, r *http.Request) {
-	var p models.Users
 	data := models.Pagedata{}
 	switch r.Method {
 	case http.MethodGet:
@@ -258,63 +438,50 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case http.MethodPost:
-		p.Email = r.FormValue("email")
+		email := r.FormValue("email")
 		password := r.FormValue("password")
-
-		result := db.Select("pass_hash, id").Where("email = ?", p.Email).First(&p)
-		if result.Error != nil {
-			if result.Error == gorm.ErrRecordNotFound {
-				data.Errmsg = "Mots de passe ou email incorrect"
-				tpl.ExecuteTemplate(w, "login.html", data)
-				return
-			}
-			log.Printf("erreur select utilisateur login: %v", result.Error)
-			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur serveur est survenue.", "login select utilisateur: "+result.Error.Error())
-			return
-		}
-
-		if err := bcrypt.CompareHashAndPassword([]byte(p.PasswordHash), []byte(password)); err != nil {
-			data.Errmsg = "Mots de passe ou email incorrect"
+		if email == "" || password == "" {
+			data.Errmsg = "Email et mot de passe requis"
 			tpl.ExecuteTemplate(w, "login.html", data)
 			return
 		}
 
-		Code, err := generateCode()
-		if err != nil {
-			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de générer le code de vérification.", "generateCode: "+err.Error())
-			return
-		}
-
-		expiresAt := time.Now().Add(5 * time.Minute)
-
-		err = SendVerificationEmail(p.Email, Code)
-		if err != nil {
-			log.Printf("erreur envoi email de vérification: %v", err)
-			data.Errmsg = "Impossible d'envoyer le code de vérification. Réessaie plus tard."
+		authResp, authErr := supabaseAuthenticate(email, password)
+		if authErr != nil {
+			log.Printf("login supabase échoué pour %s: %v", email, authErr)
+			data.Errmsg = "Mots de passe ou email incorrect"
 			if tplErr := tpl.ExecuteTemplate(w, "login.html", data); tplErr != nil {
-				renderErrorPage(w, r, http.StatusInternalServerError, "Erreur lors de l'envoi de l'email.", "template login.html après erreur email: "+tplErr.Error())
+				renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template login.html après auth échouée: "+tplErr.Error())
 			}
 			return
 		}
 
-		emailVerif := models.Email_verification{
-			User_id:           p.Id,
-			Verify_token:      Code,
-			Verify_expires_at: expiresAt,
-			Is_verified:       false,
-		}
-		if err := db.Where("users_id = ? AND is_verified = ?", p.Id, false).Delete(&models.Email_verification{}).Error; err != nil {
-			log.Printf("erreur purge email_verification: %v", err)
-			renderErrorPage(w, r, http.StatusInternalServerError, "Erreur lors de la préparation du code de vérification.", "purge email_verification: "+err.Error())
-			return
-		}
-		if err := db.Create(&emailVerif).Error; err != nil {
-			log.Printf("erreur insert email_verification: %v", err)
-			renderErrorPage(w, r, http.StatusInternalServerError, "Erreur lors de l'enregistrement du code de vérification.", "insert email_verification: "+err.Error())
-			return
+		expiresAt := time.Now().Add(8 * time.Hour)
+		if authResp.ExpiresIn > 0 {
+			expiresAt = time.Now().Add(time.Duration(authResp.ExpiresIn) * time.Second)
 		}
 
-		http.Redirect(w, r, "/verify?User_id="+strconv.Itoa(p.Id), http.StatusSeeOther)
+		sessionToken := authResp.AccessToken
+		sess, hydrateErr := hydrateSessionFromJWT(sessionToken)
+		if hydrateErr != nil {
+			renderErrorPage(w, r, http.StatusUnauthorized, "Session invalide, reconnectez-vous.", "hydrateSessionFromJWT login: "+hydrateErr.Error())
+			return
+		}
+		sess.Expiry = expiresAt
+		sessions[sessionToken] = sess
+
+		isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_token",
+			Value:    sessionToken,
+			Expires:  expiresAt,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   isSecure,
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		http.Redirect(w, r, "/home", http.StatusSeeOther)
 
 	default:
 		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "loginHandle méthode non autorisée")
@@ -344,19 +511,6 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		password := r.FormValue("password")
 		passwordV := r.FormValue("passwordV")
 
-		var existingUser models.Users
-		lookupErr := db.Select("email").Where("email = ?", p.Email).First(&existingUser).Error
-		if lookupErr == nil {
-			data.Errmsg = "Email déjà utilisé"
-			tpl.ExecuteTemplate(w, "register.html", data)
-			return
-		}
-		if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
-			log.Printf("erreur lookup email register: %v", lookupErr)
-			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur serveur est survenue.", "register lookup email: "+lookupErr.Error())
-			return
-		}
-
 		if password != passwordV {
 			data.Errmsg = "Les mots de passe ne correspondent pas !"
 			tpl.ExecuteTemplate(w, "register.html", data)
@@ -368,21 +522,13 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 			tpl.ExecuteTemplate(w, "register.html", data)
 			return
 		}
-		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de sécuriser le mot de passe.", "bcrypt GenerateFromPassword: "+err.Error())
-			return
-		}
 
-		newUser := models.Users{
-			Email:        p.Email,
-			PasswordHash: string(hashed),
-			FirstName:    p.FirstName,
-			LastName:     p.LastName,
-			CreatedAt:    time.Now(),
-		}
-		if err := db.Create(&newUser).Error; err != nil {
-			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de créer votre compte.", "insert users: "+err.Error())
+		if err := supabaseSignUp(p.Email, password, p.FirstName, p.LastName); err != nil {
+			log.Printf("register supabase signup échoué pour %s: %v", p.Email, err)
+			data.Errmsg = "Impossible de créer le compte (email déjà utilisé ou invalide)"
+			if tplErr := tpl.ExecuteTemplate(w, "register.html", data); tplErr != nil {
+				renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template register.html après signup échoué: "+tplErr.Error())
+			}
 			return
 		}
 
@@ -394,75 +540,7 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func verifyHandle(w http.ResponseWriter, r *http.Request) {
-	var m models.Email_verification
-	var p models.Users
-	data := models.Pagedata{}
-	switch r.Method {
-	case http.MethodGet:
-		User_idstr := r.URL.Query().Get("User_id")
-		User_id, err := strconv.Atoi(User_idstr)
-		if err != nil {
-			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant utilisateur invalide.", "verify GET conversion User_id: "+err.Error())
-			return
-		}
-
-		msgerror := r.URL.Query().Get("error")
-		if msgerror != "" {
-			data.Errmsg = "Code invalide ou expiré"
-		} else {
-			data.Errmsg = ""
-		}
-		data.User_id = User_id
-		if err = tpl.ExecuteTemplate(w, "verify.html", data); err != nil {
-			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template verify.html: "+err.Error())
-			return
-		}
-	case http.MethodPost:
-		idstr := r.FormValue("Users_id")
-		p.Id, err = strconv.Atoi(idstr)
-		if err != nil {
-			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant utilisateur invalide.", "verify POST conversion Users_id: "+err.Error())
-			return
-		}
-		code := r.FormValue("code")
-
-		if err = db.Where("users_id = ?", p.Id).Order("id DESC").First(&m).Error; err != nil {
-			http.Redirect(w, r, "/verify?User_id="+idstr+"&error=code", http.StatusSeeOther)
-			return
-		}
-
-		if m.Verify_token != code || m.Is_verified || time.Now().After(m.Verify_expires_at) {
-			http.Redirect(w, r, "/verify?User_id="+idstr+"&error=code", http.StatusSeeOther)
-			return
-		}
-
-		log.Println("Code de vérification validé")
-
-		if err = db.Model(&models.Email_verification{}).Where("users_id = ? AND verify_token = ? AND id = ?", m.User_id, m.Verify_token, m.Id).Update("is_verified", true).Error; err != nil {
-			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de valider votre code.", "update email_verification is_verified: "+err.Error())
-			return
-		}
-
-		// we use the "github.com/google/uuid" library to generate UUIDs
-		sessionToken := uuid.NewString()
-		expiresAt := time.Now().Add(8 * time.Hour)
-
-		sessions[sessionToken] = models.Session{
-			Userid: p.Id,
-			Expiry: expiresAt,
-		}
-
-		http.SetCookie(w, &http.Cookie{
-			Name:    "session_token",
-			Value:   sessionToken,
-			Expires: expiresAt,
-		})
-
-		http.Redirect(w, r, "/home", http.StatusSeeOther)
-	default:
-		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "verifyHandle méthode non autorisée")
-		return
-	}
+	renderErrorPage(w, r, http.StatusGone, "La vérification locale a été retirée. Utilisez la confirmation email Supabase.", "verifyHandle déprécié")
 }
 
 func loadCategorieAPI(url string) error {
@@ -780,8 +858,6 @@ func favorisHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		//users_id := strconv.Itoa(sess.Userid)
-
 		liste := getallfavoris(sess.Userid)
 
 		data.Favorisliste = liste
@@ -796,7 +872,7 @@ func favorisHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getallfavoris(User_id int) []models.Favoris {
+func getallfavoris(User_id string) []models.Favoris {
 	var liste []models.Favoris
 	if err := db.Where("users_id = ?", User_id).Find(&liste).Error; err != nil {
 		log.Printf("erreur select all favoris: %v", err)
@@ -866,12 +942,31 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var user models.Users
-		if err = db.Select("first_name, last_name").Where("id = ?", sess.Userid).First(&user).Error; err != nil {
-			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de récupérer vos informations utilisateur.", "select users first/last name: "+err.Error())
-			return
+		if err = db.Select("first_name, last_name, email").Where("id = ?", sess.Userid).First(&user).Error; err == nil {
+			first_name = user.FirstName
+			last_name = user.LastName
+		} else {
+			first_name = "Utilisateur"
+			last_name = "Supabase"
+			if tokenClaims, parseErr := jwt.Parse(c.Value, func(token *jwt.Token) (interface{}, error) {
+				_, _, jwtSecret, cfgErr := getSupabaseConfig()
+				if cfgErr != nil {
+					return nil, cfgErr
+				}
+				if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+					return nil, fmt.Errorf("algorithme JWT inattendu: %s", token.Method.Alg())
+				}
+				return []byte(jwtSecret), nil
+			}); parseErr == nil && tokenClaims.Valid {
+				if claims, ok := tokenClaims.Claims.(jwt.MapClaims); ok {
+					email, _ := claims["email"].(string)
+					if email != "" {
+						first_name = strings.Split(email, "@")[0]
+						last_name = ""
+					}
+				}
+			}
 		}
-		first_name = user.FirstName
-		last_name = user.LastName
 
 		commentaire := models.Commentaire{
 			Users_id:    sess.Userid,
@@ -978,7 +1073,7 @@ func listeHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func TotalPrix(id_users int) (float64, error) {
+func TotalPrix(id_users string) (float64, error) {
 	var total float64
 	if err := db.Model(&models.Liste{}).Where("id_users = ?", id_users).Select("COALESCE(SUM(prix), 0)").Scan(&total).Error; err != nil {
 		return 0, err
@@ -1165,8 +1260,8 @@ func main() {
 	http.HandleFunc("/deletecommentaire", requireAuth(deleteCom))
 	http.HandleFunc("/liste", requireAuth(listeHandle))
 	http.HandleFunc("/liste/add", requireAuth(ListeAdd))
-	http.HandleFunc("/liste/update", listeUpdate) // ✅ CHECKBOX UPDATE !
-	http.HandleFunc("/liste/delete", listeDelete)
+	http.HandleFunc("/liste/update", requireAuth(listeUpdate)) // ✅ CHECKBOX UPDATE !
+	http.HandleFunc("/liste/delete", requireAuth(listeDelete))
 
 	// Récupérer le port via Render, sinon 8080 pour le local
 	port := os.Getenv("PORT")
@@ -1188,9 +1283,9 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		sess, exists := sessions[c.Value]
-		if !exists || time.Now().After(sess.Expiry) {
+		if _, authErr := hydrateSessionFromJWT(c.Value); authErr != nil {
 			delete(sessions, c.Value)
+			log.Printf("requireAuth refusé: %v", authErr)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}

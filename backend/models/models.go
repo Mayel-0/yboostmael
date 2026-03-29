@@ -6,7 +6,7 @@ import (
 )
 
 type Users struct {
-	Id           int       `gorm:"primaryKey;column:id"`
+	Id           string    `gorm:"primaryKey;column:id"`
 	Email        string    `gorm:"unique;column:email"`
 	PasswordHash string    `gorm:"column:pass_hash"`
 	FirstName    string    `gorm:"column:first_name"`
@@ -20,7 +20,7 @@ func (Users) TableName() string {
 
 type Pagedata struct {
 	Errmsg           string
-	User_id          int
+	User_id          string
 	Categoriefood    []Food_categorie
 	Listfood         []Food_affichage
 	Recette          []Recette
@@ -33,7 +33,7 @@ type Pagedata struct {
 
 type Commentaire struct {
 	Id          int    `gorm:"primaryKey;column:id"`
-	Users_id    int    `gorm:"column:users_id"`
+	Users_id    string `gorm:"column:users_id"`
 	Data_string string `gorm:"column:data_string"`
 	Meal_id     int    `gorm:"column:meal_id"`
 	First_name  string `gorm:"column:first_name"`
@@ -46,7 +46,7 @@ func (Commentaire) TableName() string {
 
 type Favoris struct {
 	Id        string `gorm:"primaryKey;column:id"`
-	User_id   int    `gorm:"column:users_id"`
+	User_id   string `gorm:"column:users_id"`
 	Name      string `gorm:"column:name"`
 	Categorie string `gorm:"column:categorie"`
 	Origine   string `gorm:"column:origine"`
@@ -59,7 +59,7 @@ func (Favoris) TableName() string {
 
 type Email_verification struct {
 	Id                int       `gorm:"primaryKey;column:id"`
-	User_id           int       `gorm:"column:users_id"`
+	User_id           string    `gorm:"column:users_id"`
 	Verify_token      string    `gorm:"column:verify_token"`
 	Verify_expires_at time.Time `gorm:"column:verify_expires_at"`
 	Is_verified       bool      `gorm:"column:is_verified"`
@@ -70,7 +70,7 @@ func (Email_verification) TableName() string {
 }
 
 type Session struct {
-	Userid int
+	Userid string
 	Expiry time.Time
 }
 
@@ -159,7 +159,7 @@ type Recette struct {
 
 type Liste struct {
 	Id        int     `gorm:"primaryKey;column:id"`
-	Id_users  int     `gorm:"column:id_users"`
+	Id_users  string  `gorm:"column:id_users"`
 	Aliment   string  `gorm:"column:aliment"`
 	Nombre    float64 `gorm:"column:nombre"`
 	Unite     string  `gorm:"column:unite"`
