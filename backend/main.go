@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -62,13 +61,6 @@ type SupabaseErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 	Message          string `json:"message"`
 	Msg              string `json:"msg"`
-}
-
-type SupabaseSignUpResponse struct {
-	User struct {
-		ID    string `json:"id"`
-		Email string `json:"email"`
-	} `json:"user"`
 }
 
 func renderErrorPage(w http.ResponseWriter, r *http.Request, statusCode int, userMessage, debugDetail string) {
@@ -214,10 +206,10 @@ func supabaseAuthenticate(email, password string) (SupabaseAuthResponse, error) 
 	return authResp, nil
 }
 
-func supabaseSignUp(email, password, firstName, lastName string) (string, error) {
+func supabaseSignUp(email, password, firstName, lastName string) error {
 	projectURL, anonKey, _, err := getSupabaseConfig()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	payload := map[string]interface{}{
@@ -232,13 +224,13 @@ func supabaseSignUp(email, password, firstName, lastName string) (string, error)
 	}
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	endpoint := projectURL + "/auth/v1/signup"
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", err
+		return err
 	}
 	req.Header.Set("apikey", anonKey)
 	req.Header.Set("Authorization", "Bearer "+anonKey)
@@ -247,63 +239,16 @@ func supabaseSignUp(email, password, firstName, lastName string) (string, error)
 	client := &http.Client{Timeout: 12 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer resp.Body.Close()
 
 	bodyResp, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", fmt.Errorf("supabase signup status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
+		return fmt.Errorf("supabase signup status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
 	}
 
-	var signUpResp SupabaseSignUpResponse
-	if err := json.Unmarshal(bodyResp, &signUpResp); err != nil {
-		return "", err
-	}
-
-	return signUpResp.User.ID, nil
-}
-
-func syncUserProfile(userID, email, firstName, lastName string) error {
-	if firstName == "" {
-		firstName = "Utilisateur"
-	}
-	if lastName == "" {
-		lastName = ""
-	}
-
-	if userID != "" {
-		if err := db.Model(&models.Users{}).Where("id = ?", userID).Updates(map[string]interface{}{
-			"email":      email,
-			"first_name": firstName,
-			"last_name":  lastName,
-		}).Error; err != nil {
-			return err
-		}
-
-		var existing models.Users
-		lookup := db.Where("id = ?", userID).First(&existing)
-		if lookup.Error == nil {
-			return nil
-		}
-		if !errors.Is(lookup.Error, gorm.ErrRecordNotFound) {
-			return lookup.Error
-		}
-
-		newUser := models.Users{
-			Id:        userID,
-			Email:     email,
-			FirstName: firstName,
-			LastName:  lastName,
-			CreatedAt: time.Now(),
-		}
-		return db.Create(&newUser).Error
-	}
-
-	return db.Model(&models.Users{}).Where("email = ?", email).Updates(map[string]interface{}{
-		"first_name": firstName,
-		"last_name":  lastName,
-	}).Error
+	return nil
 }
 
 func hydrateSessionFromJWT(tokenString string) (models.Session, error) {
@@ -638,18 +583,13 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		userID, err := supabaseSignUp(p.Email, password, p.FirstName, p.LastName)
-		if err != nil {
+		if err := supabaseSignUp(p.Email, password, p.FirstName, p.LastName); err != nil {
 			log.Printf("register supabase signup échoué pour %s: %v", p.Email, err)
 			data.Errmsg = "Impossible de créer le compte (email déjà utilisé ou invalide)"
 			if tplErr := tpl.ExecuteTemplate(w, "register.html", data); tplErr != nil {
 				renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template register.html après signup échoué: "+tplErr.Error())
 			}
 			return
-		}
-
-		if syncErr := syncUserProfile(userID, p.Email, p.FirstName, p.LastName); syncErr != nil {
-			log.Printf("register syncUserProfile warning pour %s: %v", p.Email, syncErr)
 		}
 
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
