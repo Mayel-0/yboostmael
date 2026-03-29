@@ -33,6 +33,45 @@ var ApiCategorie []models.Food_categorie
 var ApiFoodlist []models.Food_affichage
 var ApiRecette []models.Recette
 
+type ErrorPageData struct {
+	StatusCode int
+	Title      string
+	Message    string
+	ErrorID    string
+	Path       string
+	Method     string
+	Timestamp  string
+	ShowDebug  bool
+	Debug      string
+}
+
+func renderErrorPage(w http.ResponseWriter, r *http.Request, statusCode int, userMessage, debugDetail string) {
+	errorID := uuid.NewString()
+	showDebug := os.Getenv("SHOW_ERROR_DETAILS") == "1"
+
+	log.Printf("[ERROR][%s] status=%d method=%s path=%s remote=%s detail=%s", errorID, statusCode, r.Method, r.URL.Path, r.RemoteAddr, debugDetail)
+
+	data := ErrorPageData{
+		StatusCode: statusCode,
+		Title:      http.StatusText(statusCode),
+		Message:    userMessage,
+		ErrorID:    errorID,
+		Path:       r.URL.Path,
+		Method:     r.Method,
+		Timestamp:  time.Now().Format("02/01/2006 15:04:05"),
+		ShowDebug:  showDebug,
+		Debug:      debugDetail,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(statusCode)
+	if tplErr := tpl.ExecuteTemplate(w, "error.html", data); tplErr != nil {
+		log.Printf("[ERROR][%s] erreur template error.html: %v", errorID, tplErr)
+		http.Error(w, userMessage+" (incident: "+errorID+")", statusCode)
+		return
+	}
+}
+
 func SendEmail(to, subject, body string) error {
 	apiKey := os.Getenv("RESEND_API_KEY")
 	if apiKey == "" {
@@ -112,6 +151,7 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/html/meals.html",
 		"../frontend/html/favoris.html",
 		"../frontend/html/liste.html",
+		"../frontend/html/error.html",
 	)
 	if err != nil {
 		return nil, err
@@ -196,8 +236,13 @@ func ensureEmailVerificationSchema() error {
 }
 
 func acceuilHandle(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		renderErrorPage(w, r, http.StatusNotFound, "La page demandée est introuvable.", "route inexistante")
+		return
+	}
+
 	if err = tpl.ExecuteTemplate(w, "acceuil.html", nil); err != nil {
-		http.Error(w, "erreur template", http.StatusInternalServerError)
+		renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template acceuil.html: "+err.Error())
 		return
 	}
 }
@@ -209,7 +254,7 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		data.Errmsg = ""
 		if err = tpl.ExecuteTemplate(w, "login.html", data); err != nil {
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template login.html: "+err.Error())
 			return
 		}
 	case http.MethodPost:
@@ -224,7 +269,7 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			log.Printf("erreur select utilisateur login: %v", result.Error)
-			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur serveur est survenue.", "login select utilisateur: "+result.Error.Error())
 			return
 		}
 
@@ -236,7 +281,7 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 
 		Code, err := generateCode()
 		if err != nil {
-			http.Error(w, "erreur envoie code", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de générer le code de vérification.", "generateCode: "+err.Error())
 			return
 		}
 
@@ -247,7 +292,7 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 			log.Printf("erreur envoi email de vérification: %v", err)
 			data.Errmsg = "Impossible d'envoyer le code de vérification. Réessaie plus tard."
 			if tplErr := tpl.ExecuteTemplate(w, "login.html", data); tplErr != nil {
-				http.Error(w, "Erreur lors de l'envoi de l'email", http.StatusInternalServerError)
+				renderErrorPage(w, r, http.StatusInternalServerError, "Erreur lors de l'envoi de l'email.", "template login.html après erreur email: "+tplErr.Error())
 			}
 			return
 		}
@@ -260,19 +305,19 @@ func loginHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := db.Where("users_id = ? AND is_verified = ?", p.Id, false).Delete(&models.Email_verification{}).Error; err != nil {
 			log.Printf("erreur purge email_verification: %v", err)
-			http.Error(w, "Erreur lors de la préparation du code", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Erreur lors de la préparation du code de vérification.", "purge email_verification: "+err.Error())
 			return
 		}
 		if err := db.Create(&emailVerif).Error; err != nil {
 			log.Printf("erreur insert email_verification: %v", err)
-			http.Error(w, "Erreur lors de l'enregistrement du code", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Erreur lors de l'enregistrement du code de vérification.", "insert email_verification: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, "/verify?User_id="+strconv.Itoa(p.Id), http.StatusSeeOther)
 
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "loginHandle méthode non autorisée")
 		return
 	}
 }
@@ -284,12 +329,12 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		data.Errmsg = ""
 		if err = tpl.ExecuteTemplate(w, "register.html", data); err != nil {
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template register.html: "+err.Error())
 			return
 		}
 	case http.MethodPost:
 		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Erreur form", http.StatusBadRequest)
+			renderErrorPage(w, r, http.StatusBadRequest, "Le formulaire envoyé est invalide.", "register ParseForm: "+err.Error())
 			return
 		}
 
@@ -308,7 +353,7 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		}
 		if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
 			log.Printf("erreur lookup email register: %v", lookupErr)
-			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur serveur est survenue.", "register lookup email: "+lookupErr.Error())
 			return
 		}
 
@@ -325,7 +370,7 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		}
 		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
-			http.Error(w, "erreur dans le hashed du MDP", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de sécuriser le mot de passe.", "bcrypt GenerateFromPassword: "+err.Error())
 			return
 		}
 
@@ -337,14 +382,14 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:    time.Now(),
 		}
 		if err := db.Create(&newUser).Error; err != nil {
-			http.Error(w, "ERREUR de Insert db", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de créer votre compte.", "insert users: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "registerhandle méthode non autorisée")
 	}
 }
 
@@ -357,7 +402,7 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 		User_idstr := r.URL.Query().Get("User_id")
 		User_id, err := strconv.Atoi(User_idstr)
 		if err != nil {
-			http.Error(w, "erreur de convertion", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant utilisateur invalide.", "verify GET conversion User_id: "+err.Error())
 			return
 		}
 
@@ -369,14 +414,14 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		data.User_id = User_id
 		if err = tpl.ExecuteTemplate(w, "verify.html", data); err != nil {
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template verify.html: "+err.Error())
 			return
 		}
 	case http.MethodPost:
 		idstr := r.FormValue("Users_id")
 		p.Id, err = strconv.Atoi(idstr)
 		if err != nil {
-			http.Error(w, "erreur id users", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant utilisateur invalide.", "verify POST conversion Users_id: "+err.Error())
 			return
 		}
 		code := r.FormValue("code")
@@ -394,7 +439,7 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 		log.Println("Code de vérification validé")
 
 		if err = db.Model(&models.Email_verification{}).Where("users_id = ? AND verify_token = ? AND id = ?", m.User_id, m.Verify_token, m.Id).Update("is_verified", true).Error; err != nil {
-			http.Error(w, "erreur de update code email", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de valider votre code.", "update email_verification is_verified: "+err.Error())
 			return
 		}
 
@@ -415,7 +460,7 @@ func verifyHandle(w http.ResponseWriter, r *http.Request) {
 
 		http.Redirect(w, r, "/home", http.StatusSeeOther)
 	default:
-		http.Error(w, "Méhode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "verifyHandle méthode non autorisée")
 		return
 	}
 }
@@ -445,6 +490,11 @@ func loadListeFood(url string) error {
 
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		bodyResp, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API food status=%d body=%s", resp.StatusCode, string(bodyResp))
+	}
+
 	var apiResp models.ListFoodApi
 	if err = json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return err
@@ -461,20 +511,20 @@ func homeHandle(w http.ResponseWriter, r *http.Request) {
 
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour accéder à cette page.", "cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "session invalide ou expirée")
 			return
 		}
 
 		listrandom, err := loadRandomRecettes(20)
 		if err != nil {
-			http.Error(w, "Erreur de random", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de charger les recettes du moment.", "loadRandomRecettes: "+err.Error())
 			return
 		}
 		data.Listrandom = listrandom
@@ -486,11 +536,11 @@ func homeHandle(w http.ResponseWriter, r *http.Request) {
 		// ✅ Vérifier AVANT d'écrire
 		if err = tpl.ExecuteTemplate(w, "home.html", data); err != nil {
 			log.Printf("Erreur template home: %v", err) // Log seulement
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template home.html: "+err.Error())
 			return
 		}
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "homeHandle méthode non autorisée")
 		return
 	}
 }
@@ -520,13 +570,13 @@ func searchHandle(w http.ResponseWriter, r *http.Request) {
 
 	err = ApiSearch(url)
 	if err != nil {
-		http.Error(w, "erreur de Apisearch", http.StatusInternalServerError)
+		renderErrorPage(w, r, http.StatusBadGateway, "La recherche de recettes est indisponible pour le moment.", "ApiSearch: "+err.Error())
 		return
 	}
 
 	data.Recette = ApiRecette
 	if err = tpl.ExecuteTemplate(w, "meals.html", data); err != nil {
-		http.Error(w, "erreur template", http.StatusInternalServerError)
+		renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template meals.html(search): "+err.Error())
 		return
 	}
 }
@@ -536,22 +586,33 @@ func categorieHandle(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		categorienamestr := r.URL.Query().Get("categorie")
+		if categorienamestr == "" {
+			renderErrorPage(w, r, http.StatusBadRequest, "La catégorie demandée est invalide.", "paramètre categorie manquant")
+			return
+		}
 
-		url := os.Getenv("API_FOOD") + categorienamestr
+		apiFoodBase := os.Getenv("API_FOOD")
+		if apiFoodBase == "" {
+			apiFoodBase = "https://www.themealdb.com/api/json/v1/1/filter.php?c="
+		}
 
-		err = loadListeFood(url)
+		endpoint := apiFoodBase + url.QueryEscape(categorienamestr)
+
+		err = loadListeFood(endpoint)
 		if err != nil {
+			log.Printf("erreur loadListeFood categorie=%q endpoint=%q: %v", categorienamestr, endpoint, err)
+			renderErrorPage(w, r, http.StatusBadGateway, "Impossible de charger les recettes de cette catégorie pour le moment.", "loadListeFood: "+err.Error())
 			return
 		}
 
 		data.Listfood = ApiFoodlist
 
 		if err = tpl.ExecuteTemplate(w, "categoriefood.html", data); err != nil {
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template categoriefood.html: "+err.Error())
 			return
 		}
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "categorieHandle méthode non autorisée")
 		return
 	}
 }
@@ -563,28 +624,28 @@ func recetteHandle(w http.ResponseWriter, r *http.Request) {
 		// Récupérer l'utilisateur connecté
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour accéder à cette page.", "cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "session invalide ou expirée")
 			return
 		}
 
 		recetteidstr := r.URL.Query().Get("recette")
 		recetteid, err := strconv.Atoi(recetteidstr)
 		if err != nil {
-			http.Error(w, "erreur de convertisseur", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant de recette invalide.", "conversion id recette: "+err.Error())
 			return
 		}
 
 		url := os.Getenv("API_BYID") + recetteidstr
 		err = ApiRecettefunc(url)
 		if err != nil {
-			http.Error(w, "erreur de api recette", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadGateway, "Impossible de charger la recette demandée.", "ApiRecettefunc: "+err.Error())
 			return
 		}
 
@@ -596,7 +657,7 @@ func recetteHandle(w http.ResponseWriter, r *http.Request) {
 		// ✅ TOUT est prêt → MAINTENANT on écrit
 		if err = tpl.ExecuteTemplate(w, "meals.html", data); err != nil {
 			log.Printf("Erreur template recette: %v", err)
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template meals.html(recette): "+err.Error())
 			return
 		}
 	}
@@ -651,14 +712,14 @@ func addfavorisHandle(w http.ResponseWriter, r *http.Request) {
 
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour effectuer cette action.", "addfavoris cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "addfavoris session invalide ou expirée")
 			return
 		}
 
@@ -677,13 +738,13 @@ func addfavorisHandle(w http.ResponseWriter, r *http.Request) {
 			Thumb:     thrumb,
 		}
 		if err = db.Create(&favoris).Error; err != nil {
-			http.Error(w, "erreur d'insert", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible d'ajouter ce favori.", "insert favoris: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, referer, http.StatusSeeOther)
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "addfavorisHandle méthode non autorisée")
 		return
 	}
 }
@@ -695,14 +756,14 @@ func favorisHandle(w http.ResponseWriter, r *http.Request) {
 
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour accéder à cette page.", "favoris cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "favoris session invalide ou expirée")
 			return
 		}
 
@@ -713,11 +774,11 @@ func favorisHandle(w http.ResponseWriter, r *http.Request) {
 		data.Favorisliste = liste
 
 		if err = tpl.ExecuteTemplate(w, "favoris.html", data); err != nil {
-			http.Error(w, "erreur template", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template favoris.html: "+err.Error())
 			return
 		}
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "favorisHandle méthode non autorisée")
 		return
 	}
 }
@@ -735,14 +796,14 @@ func deletefavorisHandle(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour effectuer cette action.", "deletefavoris cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "deletefavoris session invalide ou expirée")
 			return
 		}
 
@@ -750,13 +811,13 @@ func deletefavorisHandle(w http.ResponseWriter, r *http.Request) {
 		id := r.FormValue("id")
 
 		if err = db.Where("users_id = ? AND id = ? AND name = ?", sess.Userid, id, name).Delete(&models.Favoris{}).Error; err != nil {
-			http.Error(w, "erreur de delete", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de supprimer ce favori.", "delete favoris: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, "/favoris", http.StatusSeeOther)
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "deletefavorisHandle méthode non autorisée")
 		return
 	}
 }
@@ -773,14 +834,14 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour effectuer cette action.", "addCom cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "addCom session invalide ou expirée")
 			return
 		}
 
@@ -793,7 +854,7 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 
 		var user models.Users
 		if err = db.Select("first_name, last_name").Where("id = ?", sess.Userid).First(&user).Error; err != nil {
-			http.Error(w, "select users name", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de récupérer vos informations utilisateur.", "select users first/last name: "+err.Error())
 			return
 		}
 		first_name = user.FirstName
@@ -807,13 +868,13 @@ func addCom(w http.ResponseWriter, r *http.Request) {
 			Last_name:   last_name,
 		}
 		if err = db.Create(&commentaire).Error; err != nil {
-			http.Error(w, "Erreur d'insert", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible d'ajouter votre commentaire.", "insert commentaire: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, referer, http.StatusSeeOther)
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "addCom méthode non autorisée")
 		return
 	}
 }
@@ -831,21 +892,21 @@ func deleteCom(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour effectuer cette action.", "deleteCom cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "deleteCom session invalide ou expirée")
 			return
 		}
 
 		idstr := r.FormValue("id")
 		id, err := strconv.Atoi(idstr)
 		if err != nil {
-			http.Error(w, "erreur convertion", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant de commentaire invalide.", "deleteCom conversion id: "+err.Error())
 			return
 		}
 
@@ -855,13 +916,13 @@ func deleteCom(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err = db.Where("users_id = ? AND id = ?", sess.Userid, id).Delete(&models.Commentaire{}).Error; err != nil {
-			http.Error(w, "Erreur delete", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de supprimer le commentaire.", "delete commentaire: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, referer, http.StatusSeeOther)
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "deleteCom méthode non autorisée")
 		return
 	}
 }
@@ -871,20 +932,20 @@ func listeHandle(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour accéder à cette page.", "listeHandle cookie session_token absente")
 			return
 		}
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "listeHandle session invalide ou expirée")
 			return
 		}
 
 		var Liste []models.Liste
 		if err := db.Where("id_users = ?", sess.Userid).Find(&Liste).Error; err != nil {
 			log.Printf("DB erreur: %v", err)
-			http.Error(w, "Erreur serveur", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de récupérer votre liste de courses.", "select liste: "+err.Error())
 			return
 		}
 
@@ -895,9 +956,12 @@ func listeHandle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data := models.Pagedata{Liste: Liste, PrixTotal: prixTotal}
-		tpl.ExecuteTemplate(w, "liste.html", data)
+		if err := tpl.ExecuteTemplate(w, "liste.html", data); err != nil {
+			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template liste.html: "+err.Error())
+			return
+		}
 	default:
-		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "listeHandle méthode non autorisée")
 	}
 }
 
@@ -959,14 +1023,14 @@ func ListeAdd(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour effectuer cette action.", "ListeAdd cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "ListeAdd session invalide ou expirée")
 			return
 		}
 
@@ -978,13 +1042,13 @@ func ListeAdd(w http.ResponseWriter, r *http.Request) {
 		nombrestr := r.FormValue("nombre")
 		nombre, err := strconv.ParseFloat(nombrestr, 64)
 		if err != nil {
-			http.Error(w, "Erreur de convertion", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "La quantité saisie est invalide.", "ListeAdd conversion nombre: "+err.Error())
 			return
 		}
 		prixstr := r.FormValue("prix")
 		prix, err := strconv.ParseFloat(prixstr, 64)
 		if err != nil {
-			http.Error(w, "Erreur de convertion", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "Le prix saisi est invalide.", "ListeAdd conversion prix: "+err.Error())
 			return
 		}
 
@@ -997,13 +1061,13 @@ func ListeAdd(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err = db.Create(&l).Error; err != nil {
-			http.Error(w, "Erreur de insert", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible d'ajouter cet élément à la liste.", "insert liste: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, referer, http.StatusSeeOther)
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "ListeAdd méthode non autorisée")
 		return
 	}
 }
@@ -1013,14 +1077,14 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "Non connecté", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour effectuer cette action.", "listeDelete cookie session_token absente")
 			return
 		}
 
 		sess, exists := sessions[c.Value]
 		if !exists || time.Now().After(sess.Expiry) {
 			delete(sessions, c.Value)
-			http.Error(w, "Session invalide", http.StatusUnauthorized)
+			renderErrorPage(w, r, http.StatusUnauthorized, "Votre session a expiré, reconnectez-vous.", "listeDelete session invalide ou expirée")
 			return
 		}
 
@@ -1033,18 +1097,18 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 
 		id, err := strconv.Atoi(idstr)
 		if err != nil {
-			http.Error(w, "erreur de conv", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusBadRequest, "Identifiant d'élément invalide.", "listeDelete conversion id: "+err.Error())
 			return
 		}
 
 		if err = db.Where("id_users = ? AND id = ?", sess.Userid, id).Delete(&models.Liste{}).Error; err != nil {
-			http.Error(w, "erreur de delete", http.StatusInternalServerError)
+			renderErrorPage(w, r, http.StatusInternalServerError, "Impossible de supprimer cet élément de la liste.", "delete liste: "+err.Error())
 			return
 		}
 
 		http.Redirect(w, r, referer, http.StatusSeeOther)
 	default:
-		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "listeDelete méthode non autorisée")
 		return
 	}
 }
