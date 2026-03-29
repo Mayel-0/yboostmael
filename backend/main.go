@@ -212,24 +212,26 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 		return err
 	}
 
+	signUpURL := fmt.Sprintf("%s/auth/v1/signup", projectURL)
+
+	// CETTE STRUCTURE EST LA SEULE QUE SUPABASE ACCEPTE POUR LES MÉTADONNÉES
 	signUpBody := map[string]interface{}{
 		"email":    email,
 		"password": password,
-		"options": map[string]interface{}{
+		"options": map[string]interface{}{ // L'enveloppe "options" est OBLIGATOIRE
 			"data": map[string]string{
 				"first_name": firstName,
 				"last_name":  lastName,
 			},
 		},
 	}
-	jsonData, err := json.Marshal(signUpBody)
+
+	bodyBytes, err := json.Marshal(signUpBody)
 	if err != nil {
 		return err
 	}
 
-	signUpURL := fmt.Sprintf("%s/auth/v1/signup", projectURL)
-	log.Printf("Tentative d'inscription Supabase endpoint=%s email=%s", signUpURL, email)
-	req, err := http.NewRequest(http.MethodPost, signUpURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(http.MethodPost, signUpURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return err
 	}
@@ -237,20 +239,20 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 	req.Header.Set("Authorization", "Bearer "+anonKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 12 * time.Second}
+	log.Printf("Tentative d'inscription pour: %s", email)
+
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	bodyResp, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		log.Printf("Erreur inscription Supabase status=%d body=%s", resp.StatusCode, string(bodyResp))
-		return fmt.Errorf("supabase signup status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Erreur Supabase: %s", string(body))
+		return fmt.Errorf("erreur inscription status=%d", resp.StatusCode)
 	}
-
-	log.Printf("Inscription Supabase OK status=%d email=%s", resp.StatusCode, email)
 
 	return nil
 }
