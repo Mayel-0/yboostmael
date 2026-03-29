@@ -85,9 +85,9 @@ func renderErrorPage(w http.ResponseWriter, r *http.Request, statusCode int, use
 }
 
 func getSupabaseConfig() (projectURL, anonKey, jwtSecret string, cfgErr error) {
-	projectURL = os.Getenv("SUPABASE_URL")
-	anonKey = os.Getenv("SUPABASE_ANON_KEY")
-	jwtSecret = os.Getenv("SUPABASE_JWT_SECRET")
+	projectURL = strings.Trim(os.Getenv("SUPABASE_URL"), "\" \t\n\r")
+	anonKey = strings.Trim(os.Getenv("SUPABASE_ANON_KEY"), "\" \t\n\r")
+	jwtSecret = strings.Trim(os.Getenv("SUPABASE_JWT_SECRET"), "\" \t\n\r")
 
 	if projectURL == "" || anonKey == "" || jwtSecret == "" {
 		return "", "", "", fmt.Errorf("variables Supabase manquantes (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET)")
@@ -228,7 +228,12 @@ func hydrateSessionFromJWT(tokenString string) (models.Session, error) {
 		}
 		return []byte(jwtSecret), nil
 	})
-	if err != nil || !parsedToken.Valid {
+	if err != nil {
+		log.Printf("Erreur détaillée JWT: %v", err)
+		return models.Session{}, fmt.Errorf("jwt invalide")
+	}
+	if !parsedToken.Valid {
+		log.Printf("Erreur détaillée JWT: token non valide")
 		return models.Session{}, fmt.Errorf("jwt invalide")
 	}
 
