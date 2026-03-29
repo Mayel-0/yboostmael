@@ -228,6 +228,7 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 	}
 
 	endpoint := projectURL + "/auth/v1/signup"
+	log.Printf("Tentative d'inscription Supabase endpoint=%s email=%s", endpoint, email)
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
@@ -245,8 +246,11 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 
 	bodyResp, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		log.Printf("Erreur inscription Supabase status=%d body=%s", resp.StatusCode, string(bodyResp))
 		return fmt.Errorf("supabase signup status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
 	}
+
+	log.Printf("Inscription Supabase OK status=%d email=%s", resp.StatusCode, email)
 
 	return nil
 }
