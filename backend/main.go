@@ -227,9 +227,9 @@ func supabaseSignUp(email, password, firstName, lastName string) error {
 		return err
 	}
 
-	endpoint := projectURL + "/auth/v1/signup"
-	log.Printf("Tentative d'inscription Supabase endpoint=%s email=%s", endpoint, email)
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
+	signUpURL := fmt.Sprintf("%s/auth/v1/signup", projectURL)
+	log.Printf("Tentative d'inscription Supabase endpoint=%s email=%s", signUpURL, email)
+	req, err := http.NewRequest(http.MethodPost, signUpURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
