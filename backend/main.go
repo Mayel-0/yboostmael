@@ -13,8 +13,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/MicahParks/keyfunc/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
@@ -28,6 +30,10 @@ var err error
 var tpl *template.Template
 var db *gorm.DB
 var sessions = map[string]models.Session{}
+
+var supabaseJWKS *keyfunc.JWKS
+var supabaseJWKSURL string
+var supabaseJWKSLock sync.Mutex
 
 var ApiCategorie []models.Food_categorie
 var ApiFoodlist []models.Food_affichage
@@ -89,12 +95,45 @@ func getSupabaseConfig() (projectURL, anonKey, jwtSecret string, cfgErr error) {
 	anonKey = strings.Trim(os.Getenv("SUPABASE_ANON_KEY"), "\" \t\n\r")
 	jwtSecret = strings.Trim(os.Getenv("SUPABASE_JWT_SECRET"), "\" \t\n\r")
 
-	if projectURL == "" || anonKey == "" || jwtSecret == "" {
-		return "", "", "", fmt.Errorf("variables Supabase manquantes (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET)")
+	if projectURL == "" || anonKey == "" {
+		return "", "", "", fmt.Errorf("variables Supabase manquantes (SUPABASE_URL, SUPABASE_ANON_KEY)")
 	}
 
 	projectURL = strings.TrimRight(projectURL, "/")
 	return projectURL, anonKey, jwtSecret, nil
+}
+
+func getSupabaseJWKS(projectURL string) (*keyfunc.JWKS, error) {
+	jwksURL := projectURL + "/auth/v1/.well-known/jwks.json"
+
+	supabaseJWKSLock.Lock()
+	defer supabaseJWKSLock.Unlock()
+
+	if supabaseJWKS != nil && supabaseJWKSURL == jwksURL {
+		return supabaseJWKS, nil
+	}
+
+	if supabaseJWKS != nil {
+		supabaseJWKS.EndBackground()
+		supabaseJWKS = nil
+		supabaseJWKSURL = ""
+	}
+
+	jwks, err := keyfunc.Get(jwksURL, keyfunc.Options{
+		RefreshInterval:   30 * time.Minute,
+		RefreshRateLimit:  time.Minute,
+		RefreshUnknownKID: true,
+		RefreshErrorHandler: func(err error) {
+			log.Printf("JWKS refresh error: %v", err)
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chargement JWKS impossible: %w", err)
+	}
+
+	supabaseJWKS = jwks
+	supabaseJWKSURL = jwksURL
+	return supabaseJWKS, nil
 }
 
 func parseSupabaseErrorBody(body []byte) string {
@@ -217,17 +256,33 @@ func hydrateSessionFromJWT(tokenString string) (models.Session, error) {
 		return sess, nil
 	}
 
-	_, _, jwtSecret, err := getSupabaseConfig()
+	projectURL, _, jwtSecret, err := getSupabaseConfig()
 	if err != nil {
 		return models.Session{}, err
 	}
 
 	parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("algorithme JWT inattendu: %s", token.Method.Alg())
+		switch token.Method.Alg() {
+		case jwt.SigningMethodHS256.Alg(), jwt.SigningMethodHS384.Alg(), jwt.SigningMethodHS512.Alg():
+			if jwtSecret == "" {
+				return nil, fmt.Errorf("SUPABASE_JWT_SECRET manquant pour validation HMAC")
+			}
+			return []byte(jwtSecret), nil
+		case jwt.SigningMethodES256.Alg(), jwt.SigningMethodES384.Alg(), jwt.SigningMethodES512.Alg(),
+			jwt.SigningMethodRS256.Alg(), jwt.SigningMethodRS384.Alg(), jwt.SigningMethodRS512.Alg():
+			jwks, jwksErr := getSupabaseJWKS(projectURL)
+			if jwksErr != nil {
+				return nil, jwksErr
+			}
+			return jwks.Keyfunc(token)
+		default:
+			return nil, fmt.Errorf("algorithme JWT non supporté: %s", token.Method.Alg())
 		}
-		return []byte(jwtSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{
+		jwt.SigningMethodHS256.Alg(), jwt.SigningMethodHS384.Alg(), jwt.SigningMethodHS512.Alg(),
+		jwt.SigningMethodES256.Alg(), jwt.SigningMethodES384.Alg(), jwt.SigningMethodES512.Alg(),
+		jwt.SigningMethodRS256.Alg(), jwt.SigningMethodRS384.Alg(), jwt.SigningMethodRS512.Alg(),
+	}))
 	if err != nil {
 		log.Printf("Erreur détaillée JWT: %v", err)
 		return models.Session{}, fmt.Errorf("jwt invalide")
