@@ -591,9 +591,10 @@ func categorieHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		defaultAPIBase := "https://www.themealdb.com/api/json/v1/1/filter.php?c="
 		apiFoodBase := os.Getenv("API_FOOD")
 		if apiFoodBase == "" {
-			apiFoodBase = "https://www.themealdb.com/api/json/v1/1/filter.php?c="
+			apiFoodBase = defaultAPIBase
 		}
 
 		endpoint := apiFoodBase + url.QueryEscape(categorienamestr)
@@ -601,8 +602,20 @@ func categorieHandle(w http.ResponseWriter, r *http.Request) {
 		err = loadListeFood(endpoint)
 		if err != nil {
 			log.Printf("erreur loadListeFood categorie=%q endpoint=%q: %v", categorienamestr, endpoint, err)
-			renderErrorPage(w, r, http.StatusBadGateway, "Impossible de charger les recettes de cette catégorie pour le moment.", "loadListeFood: "+err.Error())
-			return
+
+			fallbackEndpoint := defaultAPIBase + url.QueryEscape(categorienamestr)
+			if endpoint != fallbackEndpoint {
+				if fallbackErr := loadListeFood(fallbackEndpoint); fallbackErr == nil {
+					log.Printf("fallback loadListeFood réussi categorie=%q fallback=%q", categorienamestr, fallbackEndpoint)
+				} else {
+					log.Printf("fallback loadListeFood échoué categorie=%q fallback=%q: %v", categorienamestr, fallbackEndpoint, fallbackErr)
+					renderErrorPage(w, r, http.StatusBadGateway, "Impossible de charger les recettes de cette catégorie pour le moment.", "loadListeFood primary: "+err.Error()+" | fallback: "+fallbackErr.Error())
+					return
+				}
+			} else {
+				renderErrorPage(w, r, http.StatusBadGateway, "Impossible de charger les recettes de cette catégorie pour le moment.", "loadListeFood: "+err.Error())
+				return
+			}
 		}
 
 		data.Listfood = ApiFoodlist
