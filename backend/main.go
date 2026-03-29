@@ -1287,6 +1287,31 @@ func listeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func logoutHandle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		renderErrorPage(w, r, http.StatusMethodNotAllowed, "Méthode HTTP non autorisée.", "logoutHandle méthode non autorisée")
+		return
+	}
+
+	if c, err := r.Cookie("session_token"); err == nil {
+		delete(sessions, c.Value)
+	}
+
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
 func main() {
 	if os.Getenv("RESEND_API_KEY") == "" {
 		log.Println("ℹ️ RESEND_API_KEY non défini")
@@ -1312,6 +1337,7 @@ func main() {
 
 	http.HandleFunc("/", acceuilHandle)
 	http.HandleFunc("/login", loginHandle)
+	http.HandleFunc("/logout", logoutHandle)
 	http.HandleFunc("/register", registerhandle)
 	http.HandleFunc("/verify", verifyHandle)
 
