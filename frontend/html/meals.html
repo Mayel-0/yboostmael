@@ -113,11 +113,14 @@
 
             <!-- Display Comments -->
             {{if $.Listecommentaire}}
-              <div style="margin-bottom: 2rem;">
+              <div class="comments-list" style="margin-bottom: 2rem;">
                 {{range $.Listecommentaire}}
                   <div class="comment">
-                    <div class="container__commentaire">
-                      <h2>{{.First_name}} {{.Last_name}}</h2>
+                    <div class="comment-main">
+                      <div class="comment-header">
+                        <div class="comment-avatar">👤</div>
+                        <h4 class="comment-author">{{.First_name}} {{.Last_name}}</h4>
+                      </div>
                       <p class="comment-text">{{.Data_string}}</p>
                     </div>
                     {{if eq .Users_id $.User_id}}
