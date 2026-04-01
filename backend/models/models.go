@@ -178,3 +178,27 @@ func (r Recette) YoutubeEmbed() string {
 	u := *r.Youtube
 	return strings.Replace(u, "watch?v=", "embed/", 1)
 }
+
+type SupabaseErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	Message          string `json:"message"`
+	Msg              string `json:"msg"`
+}
+
+type SupabaseAuthResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+}
+
+type ErrorPageData struct {
+	StatusCode int
+	Title      string
+	Message    string
+	ErrorID    string
+	Path       string
+	Method     string
+	Timestamp  string
+	ShowDebug  bool
+	Debug      string
+}

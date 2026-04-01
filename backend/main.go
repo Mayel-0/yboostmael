@@ -39,37 +39,13 @@ var ApiCategorie []models.Food_categorie
 var ApiFoodlist []models.Food_affichage
 var ApiRecette []models.Recette
 
-type ErrorPageData struct {
-	StatusCode int
-	Title      string
-	Message    string
-	ErrorID    string
-	Path       string
-	Method     string
-	Timestamp  string
-	ShowDebug  bool
-	Debug      string
-}
-
-type SupabaseAuthResponse struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
-}
-
-type SupabaseErrorResponse struct {
-	Error            string `json:"error"`
-	ErrorDescription string `json:"error_description"`
-	Message          string `json:"message"`
-	Msg              string `json:"msg"`
-}
-
 func renderErrorPage(w http.ResponseWriter, r *http.Request, statusCode int, userMessage, debugDetail string) {
 	errorID := uuid.NewString()
 	showDebug := os.Getenv("SHOW_ERROR_DETAILS") == "1"
 
 	log.Printf("[ERROR][%s] status=%d method=%s path=%s remote=%s detail=%s", errorID, statusCode, r.Method, r.URL.Path, r.RemoteAddr, debugDetail)
 
-	data := ErrorPageData{
+	data := models.ErrorPageData{
 		StatusCode: statusCode,
 		Title:      http.StatusText(statusCode),
 		Message:    userMessage,
@@ -137,7 +113,7 @@ func getSupabaseJWKS(projectURL string) (*keyfunc.JWKS, error) {
 }
 
 func parseSupabaseErrorBody(body []byte) string {
-	var apiErr SupabaseErrorResponse
+	var apiErr models.SupabaseErrorResponse
 	if err := json.Unmarshal(body, &apiErr); err == nil {
 		if apiErr.ErrorDescription != "" {
 			return apiErr.ErrorDescription
@@ -159,10 +135,10 @@ func parseSupabaseErrorBody(body []byte) string {
 	return string(body)
 }
 
-func supabaseAuthenticate(email, password string) (SupabaseAuthResponse, error) {
+func supabaseAuthenticate(email, password string) (models.SupabaseAuthResponse, error) {
 	projectURL, anonKey, _, err := getSupabaseConfig()
 	if err != nil {
-		return SupabaseAuthResponse{}, err
+		return models.SupabaseAuthResponse{}, err
 	}
 
 	payload := map[string]string{
@@ -171,13 +147,13 @@ func supabaseAuthenticate(email, password string) (SupabaseAuthResponse, error) 
 	}
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return SupabaseAuthResponse{}, err
+		return models.SupabaseAuthResponse{}, err
 	}
 
 	endpoint := projectURL + "/auth/v1/token?grant_type=password"
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return SupabaseAuthResponse{}, err
+		return models.SupabaseAuthResponse{}, err
 	}
 	req.Header.Set("apikey", anonKey)
 	req.Header.Set("Authorization", "Bearer "+anonKey)
@@ -186,21 +162,21 @@ func supabaseAuthenticate(email, password string) (SupabaseAuthResponse, error) 
 	client := &http.Client{Timeout: 12 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return SupabaseAuthResponse{}, err
+		return models.SupabaseAuthResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	bodyResp, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return SupabaseAuthResponse{}, fmt.Errorf("supabase auth status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
+		return models.SupabaseAuthResponse{}, fmt.Errorf("supabase auth status=%d detail=%s", resp.StatusCode, parseSupabaseErrorBody(bodyResp))
 	}
 
-	var authResp SupabaseAuthResponse
+	var authResp models.SupabaseAuthResponse
 	if err := json.Unmarshal(bodyResp, &authResp); err != nil {
-		return SupabaseAuthResponse{}, err
+		return models.SupabaseAuthResponse{}, err
 	}
 	if authResp.AccessToken == "" {
-		return SupabaseAuthResponse{}, fmt.Errorf("supabase auth: access_token absent")
+		return models.SupabaseAuthResponse{}, fmt.Errorf("supabase auth: access_token absent")
 	}
 
 	return authResp, nil
@@ -416,17 +392,13 @@ func connectDB() error {
 		return fmt.Errorf("DATABASE_URL manquante")
 	}
 
-	var err error
-	// Connexion via GORM avec configuration explicite pour Supabase Pooler
 	db, err = gorm.Open(postgres.New(postgres.Config{
 		DSN:                  dsn,
-		PreferSimpleProtocol: true, // Aide énormément avec le pooler de Supabase
+		PreferSimpleProtocol: true,
 	}), &gorm.Config{})
 	if err != nil {
 		return fmt.Errorf("erreur ouverture GORM: %w", err)
 	}
-
-	// Récupération de l'objet SQL brut pour le Ping (optionnel mais recommandé)
 	sqlDB, err := db.DB()
 	if err != nil {
 		return err
@@ -438,8 +410,6 @@ func connectDB() error {
 
 	log.Println("✅ DB Supabase connectée avec GORM!")
 
-	// 3. Migration (Crée tes tables automatiquement)
-	// Ajoute ici tous tes modèles (Users, Favoris, Commentaire...)
 	err = db.AutoMigrate(&models.Users{}, &models.Favoris{}, &models.Commentaire{}, &models.Liste{})
 	if err != nil {
 		log.Printf("Erreur migration: %v", err)
@@ -677,7 +647,6 @@ func homeHandle(w http.ResponseWriter, r *http.Request) {
 
 		data.Favorisliste = liste
 
-		// ✅ Vérifier AVANT d'écrire
 		if err = tpl.ExecuteTemplate(w, "home.html", data); err != nil {
 			log.Printf("Erreur template home: %v", err) // Log seulement
 			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template home.html: "+err.Error())
@@ -778,7 +747,6 @@ func recetteHandle(w http.ResponseWriter, r *http.Request) {
 	data := models.Pagedata{}
 	switch r.Method {
 	case http.MethodGet:
-		// Récupérer l'utilisateur connecté
 		c, err := r.Cookie("session_token")
 		if err != nil {
 			renderErrorPage(w, r, http.StatusUnauthorized, "Vous devez être connecté pour accéder à cette page.", "cookie session_token absente")
@@ -811,7 +779,6 @@ func recetteHandle(w http.ResponseWriter, r *http.Request) {
 		data.Recette = ApiRecette
 		data.User_id = sess.Userid
 
-		// ✅ TOUT est prêt → MAINTENANT on écrit
 		if err = tpl.ExecuteTemplate(w, "meals.html", data); err != nil {
 			log.Printf("Erreur template recette: %v", err)
 			renderErrorPage(w, r, http.StatusInternalServerError, "Une erreur est survenue lors de l'affichage de la page.", "template meals.html(recette): "+err.Error())
@@ -1352,10 +1319,9 @@ func main() {
 	http.HandleFunc("/deletecommentaire", requireAuth(deleteCom))
 	http.HandleFunc("/liste", requireAuth(listeHandle))
 	http.HandleFunc("/liste/add", requireAuth(ListeAdd))
-	http.HandleFunc("/liste/update", requireAuth(listeUpdate)) // ✅ CHECKBOX UPDATE !
+	http.HandleFunc("/liste/update", requireAuth(listeUpdate))
 	http.HandleFunc("/liste/delete", requireAuth(listeDelete))
 
-	// Récupérer le port via Render, sinon 8080 pour le local
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -1363,11 +1329,9 @@ func main() {
 
 	log.Printf("🚀 Serveur prêt sur le port %s", port)
 
-	// TRÈS IMPORTANT : il faut que l'app écoute sur 0.0.0.0 pour Render
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, nil))
 }
 
-// ✅ MIDDLEWARE SIMPLE (fonctionne sans Chi)
 func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie("session_token")
